@@ -85,6 +85,7 @@ const filteredEmployees = computed(() => {
 
   return store.activeEmployees.filter(
     (employee) =>
+      employee.employee_code.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
       `${employee.last_name}${employee.first_name}`.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
       employee.department.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
       employee.category_1.toLowerCase().includes(searchQuery.value.toLowerCase()),
