@@ -16,7 +16,7 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
 
   // 활성 직원들
   const activeEmployees = computed(() => {
-    return employees.value.filter((emp) => emp.is_active)
+    return employees.value.filter((emp) => emp.is_active && emp.department === 'そうせい岩出')
   })
 
   // 오늘의 출퇴근 기록
@@ -27,7 +27,7 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
   // 직원별 기록 조회
   const getEmployeeRecord = (employeeId: string, date: string) => {
     return attendanceRecords.value.find(
-      (record) => record.employee_id === employeeId && record.date === date && record.department === 'そうせい岩出',
+      (record) => record.employee_id === employeeId && record.date === date,
     )
   }
 
