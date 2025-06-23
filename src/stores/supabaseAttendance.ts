@@ -27,7 +27,7 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
   // 직원별 기록 조회
   const getEmployeeRecord = (employeeId: string, date: string) => {
     return attendanceRecords.value.find(
-      (record) => record.employee_id === employeeId && record.date === date,
+      (record) => record.employee_id === employeeId && record.date === date && record.department === 'そうせい岩出',
     )
   }
 

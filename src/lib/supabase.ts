@@ -35,6 +35,7 @@ export interface Employee {
 export interface AttendanceRecord {
   id: string
   employee_id: string
+  department: string
   date: string
   check_in: string | null
   check_out: string | null
