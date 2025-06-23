@@ -18,13 +18,18 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 // 데이터베이스 타입 정의
 export interface Employee {
   id: string
-  name: string
+  last_name: string
+  first_name: string
   department: string
-  position: string
-  employee_number: string
+  first_name_kana: string
+  last_name_kana: string
+  gender: string
+  birthday: string
+  join_date: string
+  category_1: string
+  category_2: string
+  employee_code: string
   is_active: boolean
-  created_at: string
-  updated_at: string
 }
 
 export interface AttendanceRecord {
