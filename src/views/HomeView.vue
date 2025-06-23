@@ -85,9 +85,9 @@ const filteredEmployees = computed(() => {
 
   return store.activeEmployees.filter(
     (employee) =>
-      employee.name.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
+      `${employee.last_name}${employee.first_name}`.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
       employee.department.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
-      employee.position.toLowerCase().includes(searchQuery.value.toLowerCase()),
+      employee.category_1.toLowerCase().includes(searchQuery.value.toLowerCase()),
   )
 })
 
@@ -234,7 +234,7 @@ const isButtonDisabled = (employeeId: string) => {
           <input
             v-model="searchQuery"
             type="text"
-            placeholder="従業員名、部署、役職で検索..."
+            placeholder="従業員名、部署、職種で検索..."
             class="search-input"
           />
           <span class="search-icon">🔍</span>
@@ -243,9 +243,10 @@ const isButtonDisabled = (employeeId: string) => {
 
       <div class="employees-table">
         <div class="table-header">
+          <div class="header-cell">従業員番号</div>
           <div class="header-cell">従業員名</div>
           <div class="header-cell">部署</div>
-          <div class="header-cell">役職</div>
+          <div class="header-cell">職種</div>
           <div class="header-cell">出勤時間</div>
           <div class="header-cell">退勤時間</div>
           <div class="header-cell">勤務時間</div>
@@ -259,9 +260,10 @@ const isButtonDisabled = (employeeId: string) => {
 
         <div v-else class="employee-rows">
           <div v-for="employee in filteredEmployees" :key="employee.id" class="employee-row">
-            <div class="cell employee-name">{{ employee.name }}</div>
+            <div class="cell employee-code">{{ employee.employee_code }}</div>
+            <div class="cell employee-name">{{ employee.last_name }}{{ employee.first_name }}</div>
             <div class="cell employee-dept">{{ employee.department }}</div>
-            <div class="cell employee-position">{{ employee.position }}</div>
+            <div class="cell employee-position">{{ employee.category_1 }}</div>
             <div class="cell check-in-time">
               {{
                 formatTimeForDisplay(
@@ -319,7 +321,12 @@ const isButtonDisabled = (employeeId: string) => {
         </div>
         <div v-else class="activity-item" v-for="record in store.todayRecords" :key="record.id">
           <div class="employee-info">
-            <span class="employee-name">{{ store.getEmployeeById(record.employee_id)?.name }}</span>
+            <span class="employee-name">{{ 
+              (() => {
+                const employee = store.getEmployeeById(record.employee_id)
+                return employee ? `${employee.last_name}${employee.first_name}` : ''
+              })()
+            }}</span>
             <span class="employee-dept">{{
               store.getEmployeeById(record.employee_id)?.department
             }}</span>
@@ -559,7 +566,7 @@ const isButtonDisabled = (employeeId: string) => {
 
 .table-header {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr;
   gap: 1rem;
   padding: 1rem;
   background: #f8f9fa;
@@ -583,7 +590,7 @@ const isButtonDisabled = (employeeId: string) => {
 
 .employee-row {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr;
   gap: 1rem;
   padding: 1rem;
   background: rgba(255, 255, 255, 0.8);
@@ -602,6 +609,11 @@ const isButtonDisabled = (employeeId: string) => {
 .cell {
   padding: 0.5rem;
   font-size: 0.9rem;
+}
+
+.employee-code {
+  font-weight: 600;
+  color: #2c3e50;
 }
 
 .employee-name {

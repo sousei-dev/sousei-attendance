@@ -45,7 +45,7 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
       const { data, error: supabaseError } = await supabase
         .from('employees')
         .select('*')
-        .order('name')
+        .order('last_name')
 
       if (supabaseError) throw supabaseError
 
