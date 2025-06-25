@@ -1,21 +1,82 @@
 <script setup lang="ts">
 import { useSupabaseAttendanceStore } from '../stores/supabaseAttendance'
 import { computed, ref, onMounted, onUnmounted } from 'vue'
+import type { AttendanceRecord } from '../lib/supabase'
+import { useRouter } from 'vue-router'
 
+const router = useRouter()
 const store = useSupabaseAttendanceStore()
 const searchQuery = ref('')
 const currentTime = ref(new Date())
+const formattedTime = ref('')
+const formattedDate = ref('')
 
 // 실시간 시간 업데이트
 let timeInterval: ReturnType<typeof setInterval> | null = null
+
+// 시간과 날짜 포맷팅 함수
+const updateFormattedTime = () => {
+  formattedTime.value = currentTime.value.toLocaleTimeString('ja-JP', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })
+}
+
+const updateFormattedDate = () => {
+  formattedDate.value = currentTime.value.toLocaleDateString('ja-JP', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    weekday: 'long',
+  })
+}
+
+// 다른 포맷 옵션들 (필요시 사용)
+const shortTime = computed(() => {
+  return currentTime.value.toLocaleTimeString('ja-JP', {
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+})
+
+const militaryTime = computed(() => {
+  return currentTime.value.toLocaleTimeString('ja-JP', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })
+})
+
+const shortDate = computed(() => {
+  return currentTime.value.toLocaleDateString('ja-JP', {
+    month: 'short',
+    day: 'numeric',
+    weekday: 'short',
+  })
+})
+
+const numericDate = computed(() => {
+  return currentTime.value.toLocaleDateString('ja-JP', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  })
+})
 
 onMounted(async () => {
   // Supabase 데이터 초기화
   await store.initialize()
 
+  // 초기 포맷팅
+  updateFormattedTime()
+  updateFormattedDate()
+
   // 실시간 시간 업데이트 시작
   timeInterval = setInterval(() => {
     currentTime.value = new Date()
+    updateFormattedTime()
+    updateFormattedDate()
   }, 1000)
 })
 
@@ -23,23 +84,6 @@ onUnmounted(() => {
   if (timeInterval) {
     clearInterval(timeInterval)
   }
-})
-
-const formattedTime = computed(() => {
-  return currentTime.value.toLocaleTimeString('ja-JP', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  })
-})
-
-const formattedDate = computed(() => {
-  return currentTime.value.toLocaleDateString('ja-JP', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-    weekday: 'long',
-  })
 })
 
 // Supabase 시간 형식(HH:MM:SS)을 일본 시간 형식으로 변환
@@ -92,25 +136,104 @@ const filteredEmployees = computed(() => {
   )
 })
 
-const getEmployeeStatus = (employeeId: string) => {
-  const record = store.getEmployeeRecord(employeeId, store.currentDate)
-  if (!record) return 'not-checked'
-  if (record.check_in && record.check_out) return 'checked-out'
-  if (record.check_in) return 'checked-in'
-  return 'not-checked'
+// 직원별 기록 캐시 (야간 근무 고려)
+const employeeRecordCache = ref<Record<string, { record: AttendanceRecord | undefined; lastUpdate: number }>>({})
+
+// 직원별 기록을 computed로 관리
+const employeeRecords = computed(() => {
+  // store가 아직 초기화되지 않았거나 로딩 중이면 빈 객체 반환
+  if (store.loading || !store.activeEmployees.length) {
+    return {}
+  }
+  
+  const records: Record<string, AttendanceRecord | undefined> = {}
+  
+  filteredEmployees.value.forEach(employee => {
+    // 캐시된 기록이 있고 최신이면 반환
+    const cached = employeeRecordCache.value[employee.id]
+    const now = Date.now()
+    if (cached && (now - cached.lastUpdate) < 5000) { // 5초 캐시
+      records[employee.id] = cached.record
+      return
+    }
+
+    // 오늘 기록 확인
+    let record = store.getEmployeeRecord(employee.id, store.currentDate)
+    
+    // 오늘 기록이 없으면 어제 기록 확인 (야간 근무의 경우)
+    if (!record) {
+      const yesterday = new Date()
+      yesterday.setDate(yesterday.getDate() - 1)
+      const yesterdayDate = yesterday.toISOString().split('T')[0]
+      record = store.getEmployeeRecord(employee.id, yesterdayDate)
+    }
+    
+    // 캐시 업데이트
+    employeeRecordCache.value[employee.id] = {
+      record,
+      lastUpdate: now
+    }
+    
+    records[employee.id] = record
+  })
+  
+  return records
+})
+
+// 직원의 출퇴근 기록 가져오기 (야간 근무 고려, 캐시 사용)
+const getEmployeeRecordForDisplay = (employeeId: string) => {
+  return employeeRecords.value[employeeId]
 }
 
-const getStatusText = (status: string) => {
-  switch (status) {
-    case 'not-checked':
-      return '未出勤'
-    case 'checked-in':
-      return '出勤中'
-    case 'checked-out':
-      return '退勤'
-    default:
-      return '未出勤'
+// 직원별 상태를 computed로 관리
+const employeeStatuses = computed(() => {
+  // store가 아직 초기화되지 않았거나 로딩 중이면 빈 객체 반환
+  if (store.loading || !store.activeEmployees.length) {
+    return {}
   }
+  
+  const statuses: Record<string, string> = {}
+  
+  filteredEmployees.value.forEach(employee => {
+    const record = employeeRecords.value[employee.id]
+    if (!record) {
+      statuses[employee.id] = 'not-checked'
+    } else if (record.check_in && record.check_out) {
+      statuses[employee.id] = 'checked-out'
+    } else if (record.check_in) {
+      statuses[employee.id] = 'checked-in'
+    } else {
+      statuses[employee.id] = 'not-checked'
+    }
+  })
+  
+  return statuses
+})
+
+const getEmployeeStatus = (employeeId: string) => {
+  return employeeStatuses.value[employeeId] || 'not-checked'
+}
+
+const getStatusText = (status: string, isNightShift?: boolean) => {
+  const baseText = (() => {
+    switch (status) {
+      case 'not-checked':
+        return '未出勤'
+      case 'checked-in':
+        return '出勤中'
+      case 'checked-out':
+        return '退勤'
+      default:
+        return '未出勤'
+    }
+  })()
+  
+  // 야간 근무 표시 추가
+  if (isNightShift && status === 'checked-in') {
+    return `${baseText} (夜勤)`
+  }
+  
+  return baseText
 }
 
 const getButtonText = (status: string) => {
@@ -152,15 +275,33 @@ const getButtonColor = (status: string) => {
   }
 }
 
+const getButtonColorWithExpectedTime = (employeeId: string, status: string) => {
+  if (status === 'not-checked' && !isEmployeeExpectedTimeSet(employeeId)) {
+    return '#95a5a6' // 예상 시간 미설정 - 회색
+  }
+  return getButtonColor(status)
+}
+
 const handleAttendanceAction = async (employeeId: string) => {
   const status = getEmployeeStatus(employeeId)
 
   try {
     if (status === 'not-checked') {
-      await store.checkIn(employeeId)
+      const expectedCheckIn = getEmployeeExpectedTime(employeeId, 'checkIn')
+      const expectedCheckOut = getEmployeeExpectedTime(employeeId, 'checkOut')
+      const breakTime = getEmployeeExpectedTime(employeeId, 'breakTime')
+      await store.checkIn(employeeId, expectedCheckIn, expectedCheckOut, breakTime)
     } else if (status === 'checked-in') {
       await store.checkOut(employeeId)
     }
+    
+    // 캐시 무효화하여 최신 데이터 반영
+    employeeRecordCache.value = {}
+    // 예상 시간 캐시도 무효화
+    delete employeeExpectedTimes.value[employeeId]
+    
+    // 데이터 다시 로드
+    await store.loadAttendanceRecords()
   } catch (error) {
     console.error('出退勤処理中にエラーが発生しました:', error)
   }
@@ -168,7 +309,185 @@ const handleAttendanceAction = async (employeeId: string) => {
 
 const isButtonDisabled = (employeeId: string) => {
   const status = getEmployeeStatus(employeeId)
-  return status === 'checked-out'
+  
+  // 이미 퇴근한 경우
+  if (status === 'checked-out') {
+    return true
+  }
+  
+  // 출근하지 않은 상태에서 예상 시간이 설정되지 않은 경우
+  if (status === 'not-checked' && !isEmployeeExpectedTimeSet(employeeId)) {
+    return true
+  }
+  
+  return false
+}
+
+// 시간 옵션 생성 (30분 간격)
+const generateTimeOptions = () => {
+  const options = []
+  for (let hour = 0; hour < 24; hour++) {
+    for (let minute = 0; minute < 60; minute += 30) {
+      const timeString = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`
+      options.push(timeString)
+    }
+  }
+  return options
+}
+
+const timeOptions = generateTimeOptions()
+
+// 각 직원별 예상 시간 상태
+const employeeExpectedTimes = ref<Record<string, { checkIn: string; checkOut: string; breakTime: string }>>({})
+
+// 시간 형식 변환 (HH:MM:SS → HH:MM)
+const formatTimeForSelect = (timeString: string | null | undefined) => {
+  if (!timeString) return '00:00'
+  
+  // HH:MM:SS 형식을 HH:MM으로 변환
+  const timeParts = timeString.split(':')
+  if (timeParts.length >= 2) {
+    return `${timeParts[0]}:${timeParts[1]}`
+  }
+  
+  return '00:00'
+}
+
+// 시간을 분으로 변환
+const timeToMinutes = (timeString: string) => {
+  const [hours, minutes] = timeString.split(':').map(Number)
+  return hours * 60 + minutes
+}
+
+// 직원의 예상 시간 가져오기
+const getEmployeeExpectedTime = (employeeId: string, type: 'checkIn' | 'checkOut' | 'breakTime') => {
+  if (!employeeExpectedTimes.value[employeeId]) {
+    // 먼저 현재 날짜의 AttendanceRecord에서 scheduled 시간 확인
+    let record = store.getEmployeeRecord(employeeId, store.currentDate)
+    
+    // 현재 날짜에 기록이 없으면 어제 기록 확인 (야간 근무의 경우)
+    if (!record) {
+      const yesterday = new Date()
+      yesterday.setDate(yesterday.getDate() - 1)
+      const yesterdayDate = yesterday.toISOString().split('T')[0]
+      record = store.getEmployeeRecord(employeeId, yesterdayDate)
+    }
+    
+    const scheduledCheckIn = formatTimeForSelect(record?.scheduled_check_in)
+    const scheduledCheckOut = formatTimeForSelect(record?.scheduled_check_out)
+    const breakTime = formatTimeForSelect(record?.break_time)
+    
+    employeeExpectedTimes.value[employeeId] = { 
+      checkIn: scheduledCheckIn, 
+      checkOut: scheduledCheckOut,
+      breakTime: breakTime
+    }
+  }
+  return employeeExpectedTimes.value[employeeId][type]
+}
+
+// 직원의 예상 시간 설정
+const setEmployeeExpectedTime = (employeeId: string, type: 'checkIn' | 'checkOut' | 'breakTime', time: string) => {
+  if (!employeeExpectedTimes.value[employeeId]) {
+    // 먼저 현재 날짜의 AttendanceRecord에서 scheduled 시간 확인
+    let record = store.getEmployeeRecord(employeeId, store.currentDate)
+    
+    // 현재 날짜에 기록이 없으면 어제 기록 확인 (야간 근무의 경우)
+    if (!record) {
+      const yesterday = new Date()
+      yesterday.setDate(yesterday.getDate() - 1)
+      const yesterdayDate = yesterday.toISOString().split('T')[0]
+      record = store.getEmployeeRecord(employeeId, yesterdayDate)
+    }
+    
+    const scheduledCheckIn = formatTimeForSelect(record?.scheduled_check_in)
+    const scheduledCheckOut = formatTimeForSelect(record?.scheduled_check_out)
+    const breakTime = formatTimeForSelect(record?.break_time)
+    
+    employeeExpectedTimes.value[employeeId] = { 
+      checkIn: scheduledCheckIn, 
+      checkOut: scheduledCheckOut,
+      breakTime: breakTime
+    }
+  }
+  employeeExpectedTimes.value[employeeId][type] = time
+}
+
+// 직원의 예상 시간이 모두 설정되었는지 확인
+const isEmployeeExpectedTimeSet = (employeeId: string) => {
+  const checkIn = getEmployeeExpectedTime(employeeId, 'checkIn')
+  return checkIn !== '00:00'
+}
+
+// 휴게시간 자동 설정
+const autoSetBreakTime = (employeeId: string) => {
+  const checkIn = getEmployeeExpectedTime(employeeId, 'checkIn')
+  const checkOut = getEmployeeExpectedTime(employeeId, 'checkOut')
+  
+  if (checkIn !== '00:00' && checkOut !== '00:00') {
+    const checkInMinutes = timeToMinutes(checkIn)
+    const checkOutMinutes = timeToMinutes(checkOut)
+    
+    // 퇴근시간이 출근시간보다 작으면 다음날로 간주
+    let workMinutes = checkOutMinutes - checkInMinutes
+    if (workMinutes <= 0) {
+      workMinutes += 24 * 60 // 24시간 추가
+    }
+    
+    const workHours = workMinutes / 60
+    
+    // 6시간 이상 근무 시 1시간 휴게시간 자동 설정
+    if (workHours >= 6) {
+      setEmployeeExpectedTime(employeeId, 'breakTime', '01:00')
+    } else if (workHours >= 4) {
+      setEmployeeExpectedTime(employeeId, 'breakTime', '00:30')
+    } else {
+      setEmployeeExpectedTime(employeeId, 'breakTime', '00:00')
+    }
+  }
+}
+
+// 휴게시간 옵션 생성 (30분 단위로 4시간까지)
+const generateBreakTimeOptions = () => {
+  const options = []
+  for (let hour = 0; hour <= 4; hour++) {
+    for (let minute = 0; minute < 60; minute += 30) {
+      const timeString = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`
+      options.push(timeString)
+    }
+  }
+  return options
+}
+
+const breakTimeOptions = generateBreakTimeOptions()
+
+// 이벤트 핸들러 함수들
+const handleExpectedCheckInChange = (employeeId: string, event: Event) => {
+  const target = event.target as HTMLSelectElement
+  setEmployeeExpectedTime(employeeId, 'checkIn', target.value)
+  // 출퇴근시간 변경 시 휴게시간 자동 조정
+  autoSetBreakTime(employeeId)
+}
+
+const handleExpectedCheckOutChange = (employeeId: string, event: Event) => {
+  const target = event.target as HTMLSelectElement
+  setEmployeeExpectedTime(employeeId, 'checkOut', target.value)
+  // 출퇴근시간 변경 시 휴게시간 자동 조정
+  autoSetBreakTime(employeeId)
+}
+
+const handleBreakTimeChange = (employeeId: string, event: Event) => {
+  const target = event.target as HTMLSelectElement
+  setEmployeeExpectedTime(employeeId, 'breakTime', target.value)
+}
+
+// 직원 행 클릭 핸들러
+const handleEmployeeRowClick = (employeeId: string) => {
+  // EmployeesAttendanceView 페이지로 이동하면서 직원 ID를 쿼리 파라미터로 전달
+  router.push({
+    name: 'employeesAttendanceView',
+    query: { employeeId }
+  })
 }
 </script>
 
@@ -231,14 +550,16 @@ const isButtonDisabled = (employeeId: string) => {
     <div class="employees-section">
       <div class="section-header">
         <h2>従業員出退勤管理</h2>
-        <div class="search-box">
-          <input
-            v-model="searchQuery"
-            type="text"
-            placeholder="従業員名、部署、職種で検索..."
-            class="search-input"
-          />
-          <span class="search-icon">🔍</span>
+        <div class="header-controls">
+          <div class="search-box">
+            <input
+              v-model="searchQuery"
+              type="text"
+              placeholder="従業員名、部署、職種で検索..."
+              class="search-input"
+            />
+            <span class="search-icon">🔍</span>
+          </div>
         </div>
       </div>
 
@@ -248,6 +569,9 @@ const isButtonDisabled = (employeeId: string) => {
           <div class="header-cell">従業員名</div>
           <div class="header-cell">部署</div>
           <div class="header-cell">職種</div>
+          <div class="header-cell">予想 出勤時間</div>
+          <div class="header-cell">予想 退勤時間</div>
+          <div class="header-cell">休憩時間</div>
           <div class="header-cell">出勤時間</div>
           <div class="header-cell">退勤時間</div>
           <div class="header-cell">勤務時間</div>
@@ -260,29 +584,69 @@ const isButtonDisabled = (employeeId: string) => {
         </div>
 
         <div v-else class="employee-rows">
-          <div v-for="employee in filteredEmployees" :key="employee.id" class="employee-row">
+          <div v-for="employee in filteredEmployees" :key="employee.id" class="employee-row" @click="handleEmployeeRowClick(employee.id)">
             <div class="cell employee-code">{{ employee.employee_code }}</div>
             <div class="cell employee-name">{{ employee.last_name }}{{ employee.first_name }}</div>
             <div class="cell employee-dept">{{ employee.department }}</div>
             <div class="cell employee-position">{{ employee.category_1 }}</div>
+            <div class="cell expected-checkin">
+              <select 
+                :value="getEmployeeExpectedTime(employee.id, 'checkIn')"
+                @change="handleExpectedCheckInChange(employee.id, $event)"
+                @click.stop
+                class="time-select-small"
+                :disabled="getEmployeeStatus(employee.id) === 'checked-out'"
+              >
+                <option v-for="time in timeOptions" :key="time" :value="time">
+                  {{ time }}
+                </option>
+              </select>
+            </div>
+            <div class="cell expected-checkout">
+              <select 
+                :value="getEmployeeExpectedTime(employee.id, 'checkOut')"
+                @change="handleExpectedCheckOutChange(employee.id, $event)"
+                @click.stop
+                class="time-select-small"
+                :disabled="getEmployeeStatus(employee.id) === 'checked-out'"
+              >
+                <option v-for="time in timeOptions" :key="time" :value="time">
+                  {{ time }}
+                </option>
+              </select>
+            </div>
+            <div class="cell break-time">
+              <select 
+                :value="getEmployeeExpectedTime(employee.id, 'breakTime')"
+                @change="handleBreakTimeChange(employee.id, $event)"
+                @click.stop
+                class="time-select-small"
+                :disabled="getEmployeeStatus(employee.id) === 'checked-out'"
+              >
+                <option v-for="time in breakTimeOptions" :key="time" :value="time">
+                  {{ time }}
+                </option>
+              </select>
+            </div>
             <div class="cell check-in-time">
+              {{ getEmployeeRecordForDisplay(employee.id)?.is_night_shift ? '前日' : '' }}
               {{
                 formatTimeForDisplay(
-                  store.getEmployeeRecord(employee.id, store.currentDate)?.check_in,
+                  getEmployeeRecordForDisplay(employee.id)?.check_in,
                 )
               }}
             </div>
             <div class="cell check-out-time">
               {{
                 formatTimeForDisplay(
-                  store.getEmployeeRecord(employee.id, store.currentDate)?.check_out,
+                  getEmployeeRecordForDisplay(employee.id)?.check_out,
                 )
               }}
             </div>
             <div class="cell total-hours">
               {{
-                store.getEmployeeRecord(employee.id, store.currentDate)?.total_hours
-                  ? `${store.getEmployeeRecord(employee.id, store.currentDate)?.total_hours}時間`
+                getEmployeeRecordForDisplay(employee.id)?.total_hours
+                  ? `${getEmployeeRecordForDisplay(employee.id)?.total_hours}時間`
                   : '-'
               }}
             </div>
@@ -291,57 +655,25 @@ const isButtonDisabled = (employeeId: string) => {
                 class="status-badge"
                 :style="{ backgroundColor: getStatusColor(getEmployeeStatus(employee.id)) }"
               >
-                {{ getStatusText(getEmployeeStatus(employee.id)) }}
+                {{ getStatusText(getEmployeeStatus(employee.id), getEmployeeRecordForDisplay(employee.id)?.is_night_shift) }}
               </span>
             </div>
             <div class="cell action">
               <button
-                @click="handleAttendanceAction(employee.id)"
+                @click.stop="handleAttendanceAction(employee.id)"
                 :disabled="isButtonDisabled(employee.id) || store.loading"
                 class="attendance-btn"
-                :style="{ backgroundColor: getButtonColor(getEmployeeStatus(employee.id)) }"
+                :style="{ backgroundColor: getButtonColorWithExpectedTime(employee.id, getEmployeeStatus(employee.id)) }"
                 :class="{
                   'check-in': getEmployeeStatus(employee.id) === 'not-checked',
                   'check-out': getEmployeeStatus(employee.id) === 'checked-in',
-                  disabled: getEmployeeStatus(employee.id) === 'checked-out',
+                  disabled: isButtonDisabled(employee.id),
                 }"
+                :title="getEmployeeStatus(employee.id) === 'not-checked' && !isEmployeeExpectedTimeSet(employee.id) ? '예상 출퇴근시간을 먼저 설정해주세요' : ''"
               >
                 {{ getButtonText(getEmployeeStatus(employee.id)) }}
               </button>
             </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="recent-activity">
-      <h2>今日の出退勤状況</h2>
-      <div class="activity-list">
-        <div v-if="store.todayRecords.length === 0" class="no-records">
-          まだ出退勤記録がありません。
-        </div>
-        <div v-else class="activity-item" v-for="record in store.todayRecords" :key="record.id">
-          <div class="employee-info">
-            <span class="employee-name">{{ 
-              (() => {
-                const employee = store.getEmployeeById(record.employee_id)
-                return employee ? `${employee.last_name}${employee.first_name}` : ''
-              })()
-            }}</span>
-            <span class="employee-dept">{{
-              store.getEmployeeById(record.employee_id)?.department
-            }}</span>
-          </div>
-          <div class="attendance-info">
-            <span v-if="record.check_in" class="check-in"
-              >出勤: {{ formatTimeForDisplay(record.check_in) }}</span
-            >
-            <span v-if="record.check_out" class="check-out"
-              >退勤: {{ formatTimeForDisplay(record.check_out) }}</span
-            >
-            <span v-if="record.total_hours" class="total-hours"
-              >({{ record.total_hours }}時間)</span
-            >
           </div>
         </div>
       </div>
@@ -531,6 +863,83 @@ const isButtonDisabled = (employeeId: string) => {
   font-weight: 600;
 }
 
+.header-controls {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+
+.time-settings {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.time-setting-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.time-setting-item label {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #2c3e50;
+  white-space: nowrap;
+}
+
+.time-select {
+  width: 120px;
+  padding: 0.75rem;
+  border: 2px solid #e0e0e0;
+  border-radius: 8px;
+  font-size: 1rem;
+  background: white;
+  transition: border-color 0.3s ease;
+  cursor: pointer;
+}
+
+.time-select:focus {
+  outline: none;
+  border-color: #667eea;
+}
+
+.time-select:hover {
+  border-color: #667eea;
+}
+
+.time-select-small {
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  background: white;
+  transition: border-color 0.3s ease;
+  cursor: pointer;
+}
+
+.time-select-small:focus {
+  outline: none;
+  border-color: #667eea;
+}
+
+.time-select-small:hover {
+  border-color: #667eea;
+}
+
+.time-select-small:disabled {
+  background-color: #f5f5f5;
+  color: #999;
+  cursor: not-allowed;
+  border-color: #ddd;
+}
+
+.time-select-small:disabled:hover {
+  border-color: #ddd;
+}
+
 .search-box {
   position: relative;
   min-width: 300px;
@@ -567,7 +976,7 @@ const isButtonDisabled = (employeeId: string) => {
 
 .table-header {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr;
   gap: 1rem;
   padding: 1rem;
   background: #f8f9fa;
@@ -591,13 +1000,14 @@ const isButtonDisabled = (employeeId: string) => {
 
 .employee-row {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr;
   gap: 1rem;
   padding: 1rem;
   background: rgba(255, 255, 255, 0.8);
   border-radius: 8px;
   align-items: center;
   transition: all 0.3s ease;
+  cursor: pointer;
 }
 
 .employee-row:hover {
@@ -846,6 +1256,19 @@ const isButtonDisabled = (employeeId: string) => {
     align-items: stretch;
   }
 
+  .header-controls {
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .time-settings {
+    justify-content: center;
+  }
+
+  .time-setting-item {
+    min-width: 120px;
+  }
+
   .search-box {
     min-width: auto;
   }
@@ -923,3 +1346,4 @@ const isButtonDisabled = (employeeId: string) => {
   }
 }
 </style>
+

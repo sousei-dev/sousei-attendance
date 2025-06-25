@@ -41,6 +41,10 @@ export interface AttendanceRecord {
   check_out: string | null
   total_hours: number | null
   status: 'present' | 'late' | 'early-leave' | 'absent'
+  scheduled_check_in: string | null
+  scheduled_check_out: string | null
+  break_time: string | null
+  is_night_shift?: boolean
   created_at: string
   updated_at: string
 }

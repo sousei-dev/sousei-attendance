@@ -90,7 +90,7 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
   }
 
   // 출근 처리
-  const checkIn = async (employeeId: string) => {
+  const checkIn = async (employeeId: string, expectedCheckInTime?: string, expectedCheckOutTime?: string, breakTime?: string) => {
     loading.value = true
     error.value = null
 
@@ -105,19 +105,52 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
         throw new Error('既に出勤処理されています。')
       }
 
-      // 출근 시간 기준으로 상태 결정 (9시 이전: 정상, 이후: 지각)
-      const isLate = now.getHours() > 9 || (now.getHours() === 9 && now.getMinutes() > 0)
-      const status: 'present' | 'late' = isLate ? 'late' : 'present'
+      // 야간 근무 여부 확인 (18시 이후 출근 또는 06시 이전 출근)
+      const isNightShift = now.getHours() >= 18 || now.getHours() < 6
+      
+      // 야간 근무의 경우 실제 근무 날짜 계산
+      let actualWorkDate = currentDate.value
+      if (isNightShift && now.getHours() >= 18) {
+        // 18시 이후 출근은 다음날까지 근무
+        const tomorrow = new Date(now)
+        tomorrow.setDate(tomorrow.getDate() + 1)
+        actualWorkDate = tomorrow.toISOString().split('T')[0]
+      }
+
+      // 출근 시간 기준으로 상태 결정 (예상 출근시간 기준)
+      let status: 'present' | 'late' = 'present'
+      if (expectedCheckInTime) {
+        const expectedTime = new Date(`2000-01-01T${expectedCheckInTime}`)
+        const actualTime = new Date(`2000-01-01T${checkInTime}`)
+        if (actualTime > expectedTime) {
+          status = 'late'
+        }
+      } else {
+        // 야간 근무의 경우 다른 기준 적용
+        if (isNightShift) {
+          // 야간 근무: 20시 이전 정상, 이후 지각
+          const isLate = now.getHours() > 20 || (now.getHours() === 20 && now.getMinutes() > 0)
+          status = isLate ? 'late' : 'present'
+        } else {
+          // 주간 근무: 9시 이전 정상, 이후 지각
+          const isLate = now.getHours() > 9 || (now.getHours() === 9 && now.getMinutes() > 0)
+          status = isLate ? 'late' : 'present'
+        }
+      }
 
       const { data, error: supabaseError } = await supabase
         .from('attendance_records')
         .insert({
           employee_id: employeeId,
-          date: currentDate.value,
+          date: actualWorkDate, // 실제 근무 날짜 사용
           check_in: checkInTime,
           check_out: null,
           total_hours: null,
           status,
+          scheduled_check_in: expectedCheckInTime || null,
+          scheduled_check_out: expectedCheckOutTime || null,
+          break_time: breakTime || null, // 휴게시간 추가
+          is_night_shift: isNightShift, // 야간 근무 플래그 추가
         })
         .select()
         .single()
@@ -144,8 +177,29 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
       const now = new Date()
       const checkOutTime = now.toTimeString().slice(0, 8) // HH:MM:SS 형식
 
-      // 출근 기록 찾기
-      const record = getEmployeeRecord(employeeId, currentDate.value)
+      // 출근 기록 찾기 (야간 근무 고려)
+      let record = getEmployeeRecord(employeeId, currentDate.value)
+      
+      // 오늘 기록이 없으면 어제 기록 확인 (야간 근무의 경우)
+      if (!record) {
+        const yesterday = new Date(now)
+        yesterday.setDate(yesterday.getDate() - 1)
+        const yesterdayDate = yesterday.toISOString().split('T')[0]
+        record = getEmployeeRecord(employeeId, yesterdayDate)
+        
+        // 어제 기록도 없으면 이전 날짜들 확인 (최대 3일 전까지)
+        if (!record) {
+          for (let i = 2; i <= 3; i++) {
+            const previousDate = new Date(now)
+            previousDate.setDate(previousDate.getDate() - i)
+            const previousDateStr = previousDate.toISOString().split('T')[0]
+            record = getEmployeeRecord(employeeId, previousDateStr)
+            if (record && record.check_in && !record.check_out) {
+              break
+            }
+          }
+        }
+      }
 
       if (!record || !record.check_in) {
         throw new Error('出勤記録がありません。')
@@ -155,16 +209,65 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
         throw new Error('既に退勤処理されています。')
       }
 
-      // 근무 시간 계산
+      // 근무 시간 계산 (야간 근무 고려)
       const checkInTime = new Date(`2000-01-01T${record.check_in}`)
       const checkOutTimeObj = new Date(`2000-01-01T${checkOutTime}`)
-      const totalHours = (checkOutTimeObj.getTime() - checkInTime.getTime()) / (1000 * 60 * 60)
+      
+      let totalMinutes = (checkOutTimeObj.getTime() - checkInTime.getTime()) / (1000 * 60)
+      
+      // 야간 근무의 경우 시간 계산 조정
+      if (record.is_night_shift) {
+        // 퇴근시간이 출근시간보다 작으면 다음날로 간주
+        if (totalMinutes <= 0) {
+          totalMinutes += 24 * 60 // 24시간 추가
+        }
+      }
+      
+      // 휴게시간 제외
+      let breakMinutes = 0
+      if (record.break_time) {
+        const [breakHours, breakMins] = record.break_time.split(':').map(Number)
+        breakMinutes = breakHours * 60 + breakMins
+      }
+      
+      // 순수 근무시간 계산 (휴게시간 제외)
+      const workMinutes = totalMinutes - breakMinutes
+      const totalHours = Math.floor(workMinutes / 60) + Math.round((workMinutes % 60) / 30) * 0.5
 
-      // 조퇴 여부 확인 (18시 이전 퇴근)
-      const isEarlyLeave = now.getHours() < 18
+      // 조퇴 여부 확인 (예상 퇴근시간 기준)
       let status = record.status
-      if (isEarlyLeave && status === 'present') {
-        status = 'early-leave'
+      if (record.scheduled_check_out) {
+        const expectedTime = new Date(`2000-01-01T${record.scheduled_check_out}`)
+        const actualTime = new Date(`2000-01-01T${checkOutTime}`)
+        
+        // 야간 근무의 경우 조퇴 판단 기준 조정
+        if (record.is_night_shift) {
+          // 야간 근무: 06시 이전 퇴근 시 조퇴
+          const isEarlyLeave = now.getHours() < 6
+          if (isEarlyLeave && status === 'present') {
+            status = 'early-leave'
+          }
+        } else {
+          // 주간 근무: 기존 로직
+          if (actualTime < expectedTime && status === 'present') {
+            status = 'early-leave'
+          }
+        }
+      } else {
+        // 기본값: 야간/주간 근무에 따른 조퇴 판단
+        if (record.is_night_shift) {
+          // 야간 근무: 06시 이전 퇴근
+          const isEarlyLeave = now.getHours() < 6
+          if (isEarlyLeave && status === 'present') {
+            status = 'early-leave'
+          }
+        } else {
+          // 주간 근무: 18시 이전 퇴근
+          const isEarlyLeave = now.getHours() < 18
+          if (isEarlyLeave && status === 'present') {
+            status = 'early-leave'
+          }
+        }
       }
 
       const { data, error: supabaseError } = await supabase
