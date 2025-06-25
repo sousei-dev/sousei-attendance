@@ -486,7 +486,7 @@ const getMinutesFromTime = (timeStr: string) => {
 }
 
 // 근무시간 계산 함수 (출퇴근 시간 기반, 휴식시간 제외)
-const calculateWorkHours = (checkInTime: string | null, checkOutTime: string | null, breakTime: string | null) => {
+const calculateWorkHours = (checkInTime: string | null | undefined, checkOutTime: string | null | undefined, breakTime: string | null | undefined) => {
   if (!checkInTime || !checkOutTime) return 0
   
   // 30분 단위로 반올림된 시간으로 계산
