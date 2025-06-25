@@ -131,32 +131,147 @@ const isPublicHoliday = (dateString: string) => {
   return holidays.value.includes(dateString)
 }
 
+// 시간을 30분 단위로 반올림하는 함수
+const roundToNearestHalfHour = (timeStr: string) => {
+  const [hours, minutes] = timeStr.split(':').map(Number)
+  const totalMinutes = hours * 60 + minutes
+  
+  // 30분 단위로 반올림 (0-29분은 0분, 30분은 30분, 31-59분은 30분)
+  let roundedMinutes
+  if (minutes < 30) {
+    // 0-29분은 0분으로
+    roundedMinutes = hours * 60
+  } else {
+    // 30-59분은 30분으로
+    roundedMinutes = hours * 60 + 30
+  }
+  
+  const roundedHours = Math.floor(roundedMinutes / 60)
+  const roundedMins = roundedMinutes % 60
+  
+  return `${roundedHours.toString().padStart(2, '0')}:${roundedMins.toString().padStart(2, '0')}`
+}
+
+// 시간을 분으로 변환 (반올림 적용)
+const getMinutesFromTime = (timeStr: string) => {
+  const roundedTime = roundToNearestHalfHour(timeStr)
+  const [hours, minutes] = roundedTime.split(':').map(Number)
+  return hours * 60 + minutes
+}
+
+// 근무시간 계산 함수 (출퇴근 시간 기반)
+const calculateWorkHours = (checkInTime: string | null, checkOutTime: string | null) => {
+  if (!checkInTime || !checkOutTime) return 0
+  
+  // 30분 단위로 반올림된 시간으로 계산
+  const checkInMinutes = getMinutesFromTime(checkInTime)
+  const checkOutMinutes = getMinutesFromTime(checkOutTime)
+  
+  // 퇴근시간이 출근시간보다 작으면 다음날로 간주 (야간근무)
+  let workMinutes = checkOutMinutes - checkInMinutes
+  if (workMinutes <= 0) {
+    workMinutes += 24 * 60 // 24시간 추가
+  }
+  
+  return workMinutes / 60
+}
+
+// 휴식시간을 제외한 근무시간 계산 함수
+const calculateNetWorkHours = (checkInTime: string | null, checkOutTime: string | null, breakTime: string | null) => {
+  if (!checkInTime || !checkOutTime) return 0
+  
+  const totalWorkHours = calculateWorkHours(checkInTime, checkOutTime)
+  
+  // 휴식시간 계산 (분 단위)
+  const getBreakTimeMinutes = (breakTimeStr: string | null) => {
+    if (!breakTimeStr) return 0
+    const [hours, minutes] = breakTimeStr.split(':').map(Number)
+    return hours * 60 + minutes
+  }
+  
+  const breakTimeMinutes = getBreakTimeMinutes(breakTime)
+  const breakTimeHours = breakTimeMinutes / 60
+  
+  // 총 근무시간에서 휴식시간 제외
+  const netWorkHours = totalWorkHours - breakTimeHours
+  
+  return Math.max(0, netWorkHours) // 음수가 되지 않도록
+}
+
 // 근무 통계 계산
 const workStats = computed(() => {
   const records = selectedPeriodRecords.value
   let totalWorkHours = 0
   let holidayWorkHours = 0
-  let breakTimeHours = 0
+  let holidayExcludedHours = 0
+  let weekdayWorkHours = 0
   let workDays = 0
   let holidayDays = 0
 
   records.forEach(record => {
-    if (record.check_in && record.check_out && record.total_hours) {
+    if (record.check_in && record.check_out) {
       const isHolidayWork = isHoliday(record.date)
       
-      totalWorkHours += record.total_hours
+      // 실제 출퇴근 시간으로 근무시간 계산
+      const actualWorkHours = calculateWorkHours(record.check_in, record.check_out)
+      
+      // 휴식시간 계산 (분 단위)
+      const getBreakTimeMinutes = (breakTimeStr: string | null) => {
+        if (!breakTimeStr) return 0
+        const [hours, minutes] = breakTimeStr.split(':').map(Number)
+        return hours * 60 + minutes
+      }
+      
+      const breakTimeMinutes = getBreakTimeMinutes(record.break_time)
+      const breakTimeHoursForRecord = breakTimeMinutes / 60
+      
+      // 총 근무시간에서 휴식시간 제외
+      const netWorkHours = actualWorkHours - breakTimeHoursForRecord
+      totalWorkHours += netWorkHours
       workDays++
       
       if (isHolidayWork) {
-        holidayWorkHours += record.total_hours
+        // 야간근무가 아닌 경우 9:00~18:00 사이의 근무만 휴일출근시간으로 인정
+        if (!record.is_night_shift) {
+          const checkInTime = record.check_in
+          const checkOutTime = record.check_out
+          
+          // 30분 단위로 반올림된 시간으로 계산
+          const checkInMinutes = getMinutesFromTime(checkInTime)
+          const checkOutMinutes = getMinutesFromTime(checkOutTime)
+          
+          // 9:00 (540분) ~ 18:00 (1080분) 사이의 근무시간 계산
+          const workStartMinutes = Math.max(checkInMinutes, 540) // 9:00
+          const workEndMinutes = Math.min(checkOutMinutes, 1080) // 18:00
+          
+          if (workStartMinutes < workEndMinutes) {
+            const recognizedWorkMinutes = workEndMinutes - workStartMinutes
+            const recognizedWorkHours = recognizedWorkMinutes / 60
+            
+            // 휴일출근시간에서 휴게시간 제외
+            const adjustedHolidayHours = recognizedWorkHours - breakTimeHoursForRecord
+            
+            console.log('인정 근무시간:', recognizedWorkHours, '시간')
+            console.log('휴게시간:', breakTimeHoursForRecord, '시간')
+            console.log('조정된 휴일출근시간:', adjustedHolidayHours, '시간')
+            
+            holidayWorkHours += Math.max(0, adjustedHolidayHours) // 음수가 되지 않도록
+            
+            // 제외된 시간 계산 (전체 근무시간 - 인정된 근무시간)
+            const excludedHours = netWorkHours - Math.max(0, adjustedHolidayHours)
+            holidayExcludedHours += Math.max(0, excludedHours)
+          } else {
+            // 9:00~18:00 외 시간이므로 모두 제외
+            holidayExcludedHours += netWorkHours
+          }
+        } else {
+          // 야간근무는 전체 시간에서 휴식시간 제외
+          holidayWorkHours += netWorkHours
+        }
         holidayDays++
-      }
-      
-      // 휴게시간 계산 (8시간 이상 근무 시 1시간 휴게)
-      if (record.total_hours >= 8) {
-        breakTimeHours += 1
-      } else if (record.total_hours >= 6) {
-        breakTimeHours += 0.5
+      } else {
+        // 평일 근무시간 (휴일이 아닌 경우)
+        weekdayWorkHours += netWorkHours
       }
     }
   })
@@ -164,7 +279,8 @@ const workStats = computed(() => {
   return {
     totalWorkHours: Math.round(totalWorkHours * 100) / 100,
     holidayWorkHours: Math.round(holidayWorkHours * 100) / 100,
-    breakTimeHours: Math.round(breakTimeHours * 100) / 100,
+    holidayExcludedHours: Math.round(holidayExcludedHours * 100) / 100,
+    weekdayWorkHours: Math.round(weekdayWorkHours * 100) / 100,
     workDays,
     holidayDays,
     totalDays: workDays + holidayDays
@@ -186,11 +302,8 @@ const formatDate = (dateString: string) => {
 const formatTime = (timeString: string | null) => {
   if (!timeString) return '-'
   
-  const timeParts = timeString.split(':')
-  if (timeParts.length >= 2) {
-    return `${timeParts[0]}:${timeParts[1]}`
-  }
-  return timeString
+  // 30분 단위로 반올림하여 표시
+  return roundToNearestHalfHour(timeString)
 }
 
 // 요일 확인
@@ -231,8 +344,12 @@ const getWorkStatusColor = (record: AttendanceRecord) => {
 const getTimeDifference = (expectedTime: string | null, actualTime: string | null) => {
   if (!expectedTime || !actualTime) return 0
   
-  const expected = new Date(`2000-01-01T${expectedTime}`)
-  const actual = new Date(`2000-01-01T${actualTime}`)
+  // 30분 단위로 반올림된 시간으로 계산
+  const roundedExpectedTime = roundToNearestHalfHour(expectedTime)
+  const roundedActualTime = roundToNearestHalfHour(actualTime)
+  
+  const expected = new Date(`2000-01-01T${roundedExpectedTime}`)
+  const actual = new Date(`2000-01-01T${roundedActualTime}`)
   
   return Math.abs(actual.getTime() - expected.getTime()) / (1000 * 60)
 }
@@ -386,13 +503,17 @@ const isCheckOutTimeDifferent = (record: AttendanceRecord) => {
           <div class="stat-content">
             <div class="stat-number">{{ workStats.holidayWorkHours }}時間</div>
             <div class="stat-label">休日出勤時間</div>
+            <div class="stat-excluded" v-if="workStats.holidayExcludedHours > 0">
+              (除外: {{ workStats.holidayExcludedHours }}時間)
+            </div>
+            <div class="stat-tip">※ 休日の勤務(夜勤除外)は09:00～18:00のみ認定</div>
           </div>
         </div>
         <div class="stat-card">
-          <div class="stat-icon">☕</div>
+          <div class="stat-icon">🏢</div>
           <div class="stat-content">
-            <div class="stat-number">{{ workStats.breakTimeHours }}時間</div>
-            <div class="stat-label">休憩時間</div>
+            <div class="stat-number">{{ workStats.weekdayWorkHours }}時間</div>
+            <div class="stat-label">平日勤務時間</div>
           </div>
         </div>
       </div>
@@ -444,7 +565,7 @@ const isCheckOutTimeDifferent = (record: AttendanceRecord) => {
               <div :class="{ 'time-display': !getCheckOutDifferenceText(record), 'time-difference': getCheckOutDifferenceText(record) }">{{ formatTime(record.check_out) }}</div>
             </div>
             <div class="cell hours-cell">
-              {{ record.total_hours ? `${record.total_hours}時間` : '-' }}
+              {{ record.check_in && record.check_out ? `${calculateNetWorkHours(record.check_in, record.check_out, record.break_time).toFixed(1)}時間` : '-' }}
             </div>
             <div class="cell status-cell">
               <span 
@@ -700,6 +821,22 @@ const isCheckOutTimeDifferent = (record: AttendanceRecord) => {
   margin-top: 0.25rem;
 }
 
+.stat-excluded {
+  font-size: 0.75rem;
+  color: #e74c3c;
+  margin-top: 0.25rem;
+  font-style: italic;
+  opacity: 0.8;
+}
+
+.stat-tip {
+  font-size: 0.75rem;
+  color: #e74c3c;
+  margin-top: 0.25rem;
+  font-style: italic;
+  opacity: 0.8;
+}
+
 .work-records {
   background: rgba(255, 255, 255, 0.9);
   padding: 2rem;
@@ -830,6 +967,7 @@ const isCheckOutTimeDifferent = (record: AttendanceRecord) => {
   font-family: monospace;
 }
 
+.break-time-cell,
 .checkin-cell,
 .checkout-cell {
   color: #2c3e50;

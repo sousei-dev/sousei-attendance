@@ -145,7 +145,6 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
           date: actualWorkDate, // 실제 근무 날짜 사용
           check_in: checkInTime,
           check_out: null,
-          total_hours: null,
           status,
           scheduled_check_in: expectedCheckInTime || null,
           scheduled_check_out: expectedCheckOutTime || null,
@@ -274,7 +273,6 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
         .from('attendance_records')
         .update({
           check_out: checkOutTime,
-          total_hours: Math.round(totalHours * 100) / 100,
           status,
         })
         .eq('id', record.id)

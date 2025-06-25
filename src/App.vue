@@ -31,9 +31,9 @@ onMounted(async () => {
       <div class="header-content">
         <h1 class="app-title">出退勤システム</h1>
         <nav class="main-nav">
-          <!-- <RouterLink to="/" class="nav-link">ホーム</RouterLink> -->
-          <!-- <RouterLink to="/attendance" class="nav-link">出退勤記録</RouterLink>
-          <RouterLink to="/employees" class="nav-link">従業員管理</RouterLink>
+          <RouterLink to="/" class="nav-link">ホーム</RouterLink>
+          <RouterLink to="/employeesAttendanceView" class="nav-link">従業員勤務記録表</RouterLink>
+          <!-- <RouterLink to="/employees" class="nav-link">従業員管理</RouterLink>
           <RouterLink to="/reports" class="nav-link">勤務レポート</RouterLink> -->
         </nav>
         <div class="user-section">

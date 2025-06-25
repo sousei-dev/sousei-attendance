@@ -32,38 +32,6 @@ const updateFormattedDate = () => {
   })
 }
 
-// 다른 포맷 옵션들 (필요시 사용)
-const shortTime = computed(() => {
-  return currentTime.value.toLocaleTimeString('ja-JP', {
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-})
-
-const militaryTime = computed(() => {
-  return currentTime.value.toLocaleTimeString('ja-JP', {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  })
-})
-
-const shortDate = computed(() => {
-  return currentTime.value.toLocaleDateString('ja-JP', {
-    month: 'short',
-    day: 'numeric',
-    weekday: 'short',
-  })
-})
-
-const numericDate = computed(() => {
-  return currentTime.value.toLocaleDateString('ja-JP', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  })
-})
-
 onMounted(async () => {
   // Supabase 데이터 초기화
   await store.initialize()
@@ -489,6 +457,63 @@ const handleEmployeeRowClick = (employeeId: string) => {
     query: { employeeId }
   })
 }
+
+// 시간을 30분 단위로 반올림하는 함수
+const roundToNearestHalfHour = (timeStr: string) => {
+  const [hours, minutes] = timeStr.split(':').map(Number)
+  
+  // 30분 단위로 반올림 (0-29분은 0분, 30분은 30분, 31-59분은 30분)
+  let roundedMinutes
+  if (minutes < 30) {
+    // 0-29분은 0분으로
+    roundedMinutes = hours * 60
+  } else {
+    // 30-59분은 30분으로
+    roundedMinutes = hours * 60 + 30
+  }
+  
+  const roundedHours = Math.floor(roundedMinutes / 60)
+  const roundedMins = roundedMinutes % 60
+  
+  return `${roundedHours.toString().padStart(2, '0')}:${roundedMins.toString().padStart(2, '0')}`
+}
+
+// 시간을 분으로 변환 (반올림 적용)
+const getMinutesFromTime = (timeStr: string) => {
+  const roundedTime = roundToNearestHalfHour(timeStr)
+  const [hours, minutes] = roundedTime.split(':').map(Number)
+  return hours * 60 + minutes
+}
+
+// 근무시간 계산 함수 (출퇴근 시간 기반, 휴식시간 제외)
+const calculateWorkHours = (checkInTime: string | null, checkOutTime: string | null, breakTime: string | null) => {
+  if (!checkInTime || !checkOutTime) return 0
+  
+  // 30분 단위로 반올림된 시간으로 계산
+  const checkInMinutes = getMinutesFromTime(checkInTime)
+  const checkOutMinutes = getMinutesFromTime(checkOutTime)
+  
+  // 퇴근시간이 출근시간보다 작으면 다음날로 간주 (야간근무)
+  let workMinutes = checkOutMinutes - checkInMinutes
+  if (workMinutes <= 0) {
+    workMinutes += 24 * 60 // 24시간 추가
+  }
+  
+  // 휴식시간 계산 (분 단위)
+  const getBreakTimeMinutes = (breakTimeStr: string | null) => {
+    if (!breakTimeStr) return 0
+    const [hours, minutes] = breakTimeStr.split(':').map(Number)
+    return hours * 60 + minutes
+  }
+  
+  const breakTimeMinutes = getBreakTimeMinutes(breakTime)
+  const breakTimeHours = breakTimeMinutes / 60
+  
+  // 총 근무시간에서 휴식시간 제외
+  const netWorkHours = (workMinutes / 60) - breakTimeHours
+  
+  return Math.max(0, netWorkHours) // 음수가 되지 않도록
+}
 </script>
 
 <template>
@@ -645,8 +670,8 @@ const handleEmployeeRowClick = (employeeId: string) => {
             </div>
             <div class="cell total-hours">
               {{
-                getEmployeeRecordForDisplay(employee.id)?.total_hours
-                  ? `${getEmployeeRecordForDisplay(employee.id)?.total_hours}時間`
+                getEmployeeRecordForDisplay(employee.id)?.check_in && getEmployeeRecordForDisplay(employee.id)?.check_out
+                  ? `${calculateWorkHours(getEmployeeRecordForDisplay(employee.id)?.check_in, getEmployeeRecordForDisplay(employee.id)?.check_out, getEmployeeRecordForDisplay(employee.id)?.break_time).toFixed(1)}時間`
                   : '-'
               }}
             </div>
