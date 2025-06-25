@@ -500,7 +500,7 @@ const calculateWorkHours = (checkInTime: string | null | undefined, checkOutTime
   }
   
   // 휴식시간 계산 (분 단위)
-  const getBreakTimeMinutes = (breakTimeStr: string | null) => {
+  const getBreakTimeMinutes = (breakTimeStr: string | null | undefined) => {
     if (!breakTimeStr) return 0
     const [hours, minutes] = breakTimeStr.split(':').map(Number)
     return hours * 60 + minutes
