@@ -30,6 +30,7 @@ export interface Employee {
   category_2: string
   employee_code: string
   is_active: boolean
+  salary_type: 'hourly' | 'monthly'
 }
 
 export interface AttendanceRecord {
