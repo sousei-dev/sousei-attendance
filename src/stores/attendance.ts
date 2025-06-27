@@ -7,7 +7,8 @@ export interface Employee {
   department: string
   position: string
   employeeNumber: string
-  isActive: boolean
+  isActive: boolean,
+  salary_type: 'hourly' | 'monthly'
 }
 
 export interface AttendanceRecord {
