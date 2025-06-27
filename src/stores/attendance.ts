@@ -23,32 +23,7 @@ export interface AttendanceRecord {
 
 export const useAttendanceStore = defineStore('attendance', () => {
   // 직원 목록
-  const employees = ref<Employee[]>([
-    {
-      id: '1',
-      name: '김철수',
-      department: '개발팀',
-      position: '시니어 개발자',
-      employeeNumber: 'EMP001',
-      isActive: true,
-    },
-    {
-      id: '2',
-      name: '이영희',
-      department: '디자인팀',
-      position: 'UI/UX 디자이너',
-      employeeNumber: 'EMP002',
-      isActive: true,
-    },
-    {
-      id: '3',
-      name: '박민수',
-      department: '마케팅팀',
-      position: '마케팅 매니저',
-      employeeNumber: 'EMP003',
-      isActive: true,
-    },
-  ])
+  const employees = ref<Employee[]>([])
 
   // 출/퇴근 기록
   const attendanceRecords = ref<AttendanceRecord[]>([])
