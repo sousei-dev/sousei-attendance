@@ -2,9 +2,7 @@
 import { useSupabaseAttendanceStore } from '../stores/supabaseAttendance'
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 import type { AttendanceRecord } from '../lib/supabase'
-import { useRouter } from 'vue-router'
 
-const router = useRouter()
 const store = useSupabaseAttendanceStore()
 const searchQuery = ref('')
 const currentTime = ref(new Date())
@@ -156,7 +154,7 @@ const getEmployeeRecordForDisplay = (employeeId: string) => {
 // 직원별 상태를 computed로 관리
 const employeeStatuses = computed(() => {
   // store가 아직 초기화되지 않았거나 로딩 중이면 빈 객체 반환
-  if (store.loading || !store.activeEmployees.length) {
+  if (store.loading || !store.activeEmployees.length || !store.todayRecords.length) {
     return {}
   }
   
@@ -273,21 +271,23 @@ const handleAttendanceAction = async (employeeId: string) => {
   } catch (error) {
     console.error('出退勤処理中にエラーが発生しました:', error)
   }
+  showEmployeeModal.value = false
 }
 
 const isButtonDisabled = (employeeId: string) => {
   const status = getEmployeeStatus(employeeId)
-  
   // 이미 퇴근한 경우
   if (status === 'checked-out') {
     return true
   }
-  
-  // 출근하지 않은 상태에서 예상 시간이 설정되지 않은 경우
-  if (status === 'not-checked' && !isEmployeeExpectedTimeSet(employeeId)) {
-    return true
+  // 출근하지 않은 상태에서 예상 출근/퇴근 시간이 모두 입력되지 않은 경우
+  if (status === 'not-checked') {
+    const checkIn = getEmployeeExpectedTime(employeeId, 'checkIn')
+    const checkOut = getEmployeeExpectedTime(employeeId, 'checkOut')
+    if (checkIn === '00:00' || checkOut === '00:00') {
+      return true
+    }
   }
-  
   return false
 }
 
@@ -449,15 +449,6 @@ const handleBreakTimeChange = (employeeId: string, event: Event) => {
   setEmployeeExpectedTime(employeeId, 'breakTime', target.value)
 }
 
-// 직원 행 클릭 핸들러
-const handleEmployeeRowClick = (employeeId: string) => {
-  // EmployeesAttendanceView 페이지로 이동하면서 직원 ID를 쿼리 파라미터로 전달
-  router.push({
-    name: 'employeesAttendanceView',
-    query: { employeeId }
-  })
-}
-
 // 시간을 30분 단위로 반올림하는 함수
 const roundToNearestHalfHour = (timeStr: string) => {
   const [hours, minutes] = timeStr.split(':').map(Number)
@@ -513,6 +504,20 @@ const calculateWorkHours = (checkInTime: string | null | undefined, checkOutTime
   const netWorkHours = (workMinutes / 60) - breakTimeHours
   
   return Math.max(0, netWorkHours) // 음수가 되지 않도록
+}
+
+// 모달 상태 관리
+const showEmployeeModal = ref(false)
+const selectedEmployeeForModal = ref<any>(null)
+
+const openEmployeeModal = (employee: any) => {
+  selectedEmployeeForModal.value = employee
+  showEmployeeModal.value = true
+}
+
+const closeEmployeeModal = () => {
+  showEmployeeModal.value = false
+  selectedEmployeeForModal.value = null
 }
 </script>
 
@@ -594,14 +599,7 @@ const calculateWorkHours = (checkInTime: string | null | undefined, checkOutTime
           <div class="header-cell">従業員名</div>
           <div class="header-cell">部署</div>
           <div class="header-cell">職種</div>
-          <div class="header-cell">予想 出勤時間</div>
-          <div class="header-cell">予想 退勤時間</div>
-          <div class="header-cell">休憩時間</div>
-          <div class="header-cell">出勤時間</div>
-          <div class="header-cell">退勤時間</div>
-          <div class="header-cell">勤務時間</div>
           <div class="header-cell">状態</div>
-          <div class="header-cell">操作</div>
         </div>
 
         <div v-if="filteredEmployees.length === 0" class="no-employees">
@@ -609,96 +607,95 @@ const calculateWorkHours = (checkInTime: string | null | undefined, checkOutTime
         </div>
 
         <div v-else class="employee-rows">
-          <div v-for="employee in filteredEmployees" :key="employee.id" class="employee-row" @click="handleEmployeeRowClick(employee.id)">
+          <div v-for="employee in filteredEmployees" :key="employee.id" class="employee-row" @click="openEmployeeModal(employee)">
             <div class="cell employee-code">{{ employee.employee_code }}</div>
             <div class="cell employee-name">{{ employee.last_name }}{{ employee.first_name }}</div>
             <div class="cell employee-dept">{{ employee.department }}</div>
             <div class="cell employee-position">{{ employee.category_1 }}</div>
-            <div class="cell expected-checkin">
-              <select 
-                :value="getEmployeeExpectedTime(employee.id, 'checkIn')"
-                @change="handleExpectedCheckInChange(employee.id, $event)"
-                @click.stop
-                class="time-select-small"
-                :disabled="getEmployeeStatus(employee.id) === 'checked-out'"
-              >
-                <option v-for="time in timeOptions" :key="time" :value="time">
-                  {{ time }}
-                </option>
-              </select>
-            </div>
-            <div class="cell expected-checkout">
-              <select 
-                :value="getEmployeeExpectedTime(employee.id, 'checkOut')"
-                @change="handleExpectedCheckOutChange(employee.id, $event)"
-                @click.stop
-                class="time-select-small"
-                :disabled="getEmployeeStatus(employee.id) === 'checked-out'"
-              >
-                <option v-for="time in timeOptions" :key="time" :value="time">
-                  {{ time }}
-                </option>
-              </select>
-            </div>
-            <div class="cell break-time">
-              <select 
-                :value="getEmployeeExpectedTime(employee.id, 'breakTime')"
-                @change="handleBreakTimeChange(employee.id, $event)"
-                @click.stop
-                class="time-select-small"
-                :disabled="getEmployeeStatus(employee.id) === 'checked-out'"
-              >
-                <option v-for="time in breakTimeOptions" :key="time" :value="time">
-                  {{ time }}
-                </option>
-              </select>
-            </div>
-            <div class="cell check-in-time">
-              {{ getEmployeeRecordForDisplay(employee.id)?.is_night_shift ? '前日' : '' }}
-              {{
-                formatTimeForDisplay(
-                  getEmployeeRecordForDisplay(employee.id)?.check_in,
-                )
-              }}
-            </div>
-            <div class="cell check-out-time">
-              {{
-                formatTimeForDisplay(
-                  getEmployeeRecordForDisplay(employee.id)?.check_out,
-                )
-              }}
-            </div>
-            <div class="cell total-hours">
-              {{
-                getEmployeeRecordForDisplay(employee.id)?.check_in && getEmployeeRecordForDisplay(employee.id)?.check_out
-                  ? `${calculateWorkHours(getEmployeeRecordForDisplay(employee.id)?.check_in, getEmployeeRecordForDisplay(employee.id)?.check_out, getEmployeeRecordForDisplay(employee.id)?.break_time).toFixed(1)}時間`
-                  : '-'
-              }}
-            </div>
             <div class="cell status">
               <span
+                v-if="!store.loading"
                 class="status-badge"
                 :style="{ backgroundColor: getStatusColor(getEmployeeStatus(employee.id)) }"
               >
                 {{ getStatusText(getEmployeeStatus(employee.id), getEmployeeRecordForDisplay(employee.id)?.is_night_shift) }}
               </span>
+              <span v-else class="status-badge" style="background: #b2bec3;">読み込み中...</span>
             </div>
-            <div class="cell action">
-              <button
-                @click.stop="handleAttendanceAction(employee.id)"
-                :disabled="isButtonDisabled(employee.id) || store.loading"
-                class="attendance-btn"
-                :style="{ backgroundColor: getButtonColorWithExpectedTime(employee.id, getEmployeeStatus(employee.id)) }"
-                :class="{
-                  'check-in': getEmployeeStatus(employee.id) === 'not-checked',
-                  'check-out': getEmployeeStatus(employee.id) === 'checked-in',
-                  disabled: isButtonDisabled(employee.id),
-                }"
-                :title="getEmployeeStatus(employee.id) === 'not-checked' && !isEmployeeExpectedTimeSet(employee.id) ? '예상 출퇴근시간을 먼저 설정해주세요' : ''"
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="showEmployeeModal" class="employee-modal-overlay" @click.self="closeEmployeeModal">
+      <div class="employee-modal">
+        <button class="close-btn" @click="closeEmployeeModal" title="닫기">×</button>
+        <h3>従業員詳細</h3>
+        <div v-if="selectedEmployeeForModal">
+          <div class="info-section">
+            <div><span class="info-label">従業員番号:</span> <span class="info-value">{{ selectedEmployeeForModal.employee_code }}</span></div>
+            <div><span class="info-label">従業員名:</span> <span class="info-value">{{ selectedEmployeeForModal.last_name }}{{ selectedEmployeeForModal.first_name }}</span></div>
+          </div>
+          <div class="input-section">
+            <div class="input-section-title">予想出退勤入力</div>
+            <div>
+              <span class="info-label">予想出勤時間:</span>
+              <select
+                :value="getEmployeeExpectedTime(selectedEmployeeForModal.id, 'checkIn')"
+                @change="handleExpectedCheckInChange(selectedEmployeeForModal.id, $event)"
+                class="full-width-select"
+                :disabled="getEmployeeStatus(selectedEmployeeForModal.id) !== 'not-checked'"
               >
-                {{ getButtonText(getEmployeeStatus(employee.id)) }}
-              </button>
+                <option v-for="time in timeOptions" :key="time" :value="time">{{ time }}</option>
+              </select>
             </div>
+            <div>
+              <span class="info-label">予想退勤時間:</span>
+              <select
+                :value="getEmployeeExpectedTime(selectedEmployeeForModal.id, 'checkOut')"
+                @change="handleExpectedCheckOutChange(selectedEmployeeForModal.id, $event)"
+                class="full-width-select"
+                :disabled="getEmployeeStatus(selectedEmployeeForModal.id) !== 'not-checked'"
+              >
+                <option v-for="time in timeOptions" :key="time" :value="time">{{ time }}</option>
+              </select>
+            </div>
+            <div>
+              <span class="info-label">休憩時間:</span>
+              <select
+                :value="getEmployeeExpectedTime(selectedEmployeeForModal.id, 'breakTime')"
+                @change="handleBreakTimeChange(selectedEmployeeForModal.id, $event)"
+                class="full-width-select"
+                :disabled="getEmployeeStatus(selectedEmployeeForModal.id) !== 'not-checked'"
+              >
+                <option v-for="time in breakTimeOptions" :key="time" :value="time">{{ time }}</option>
+              </select>
+            </div>
+          </div>
+          <div class="info-section">
+            <div class="input-section-title">実績</div>
+            <div><span class="info-label">出勤時間:</span> <span class="info-value">{{ formatTimeForDisplay(getEmployeeRecordForDisplay(selectedEmployeeForModal.id)?.check_in) }}</span></div>
+            <div><span class="info-label">退勤時間:</span> <span class="info-value">{{ formatTimeForDisplay(getEmployeeRecordForDisplay(selectedEmployeeForModal.id)?.check_out) }}</span></div>
+            <div><span class="info-label">休憩時間:</span> <span class="info-value">{{ getEmployeeExpectedTime(selectedEmployeeForModal.id, 'breakTime') }}</span></div>
+            <div><span class="info-label">勤務時間:</span>
+              <span class="info-value">
+                {{
+                  getEmployeeRecordForDisplay(selectedEmployeeForModal.id)?.check_in && getEmployeeRecordForDisplay(selectedEmployeeForModal.id)?.check_out
+                    ? `${calculateWorkHours(getEmployeeRecordForDisplay(selectedEmployeeForModal.id)?.check_in, getEmployeeRecordForDisplay(selectedEmployeeForModal.id)?.check_out, getEmployeeRecordForDisplay(selectedEmployeeForModal.id)?.break_time).toFixed(1)}時間`
+                    : '-'
+                }}
+              </span>
+            </div>
+          </div>
+          <div class="modal-btn-row">
+            <button
+              @click="handleAttendanceAction(selectedEmployeeForModal.id)"
+              :disabled="isButtonDisabled(selectedEmployeeForModal.id) || store.loading"
+              class="attendance-btn"
+              :style="{ backgroundColor: getButtonColorWithExpectedTime(selectedEmployeeForModal.id, getEmployeeStatus(selectedEmployeeForModal.id)) }"
+            >
+              {{ getButtonText(getEmployeeStatus(selectedEmployeeForModal.id)) }}
+            </button>
           </div>
         </div>
       </div>
@@ -819,7 +816,7 @@ const calculateWorkHours = (checkInTime: string | null | undefined, checkOutTime
 
 .stats-overview {
   display: flex;
-  gap: 1.5rem;
+  gap: 2.5rem;
   flex-wrap: wrap;
 }
 
@@ -832,7 +829,7 @@ const calculateWorkHours = (checkInTime: string | null | undefined, checkOutTime
   border-radius: 12px;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
   transition: transform 0.3s ease;
-  min-width: 250px;
+  min-width: 300px;
 }
 
 .stat-item:hover {
@@ -1001,7 +998,7 @@ const calculateWorkHours = (checkInTime: string | null | undefined, checkOutTime
 
 .table-header {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr 1fr 1fr;
   gap: 1rem;
   padding: 1rem;
   background: #f8f9fa;
@@ -1025,7 +1022,7 @@ const calculateWorkHours = (checkInTime: string | null | undefined, checkOutTime
 
 .employee-row {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr 1fr 1fr;
   gap: 1rem;
   padding: 1rem;
   background: rgba(255, 255, 255, 0.8);
@@ -1369,6 +1366,143 @@ const calculateWorkHours = (checkInTime: string | null | undefined, checkOutTime
   .recent-activity h2 {
     font-size: 1.2rem;
   }
+}
+
+.employee-modal-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+.employee-modal {
+  background: #fff;
+  border-radius: 18px;
+  padding: 2.5rem 2rem 2rem 2rem;
+  min-width: 340px;
+  max-width: 95vw;
+  box-shadow: 0 8px 32px rgba(52, 152, 219, 0.15), 0 1.5px 8px rgba(44, 62, 80, 0.08);
+  position: relative;
+  animation: modalPop 0.25s cubic-bezier(.4,1.6,.6,1) both;
+}
+
+@keyframes modalPop {
+  0% { transform: scale(0.95) translateY(30px); opacity: 0; }
+  100% { transform: scale(1) translateY(0); opacity: 1; }
+}
+
+.employee-modal h3 {
+  margin-top: 0;
+  margin-bottom: 1.5rem;
+  font-size: 1.3rem;
+  color: #2980b9;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-align: center;
+}
+
+.employee-modal .close-btn {
+  position: absolute;
+  top: 1.2rem;
+  right: 1.2rem;
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  color: #aaa;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+.employee-modal .close-btn:hover {
+  color: #e74c3c;
+}
+
+.employee-modal .info-section {
+  background: #f8f9fa;
+  border-radius: 10px;
+  padding: 1.2rem 1rem;
+  margin-bottom: 1.2rem;
+  box-shadow: 0 1px 4px rgba(52, 152, 219, 0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.employee-modal .info-label {
+  font-weight: 600;
+  color: #7f8c8d;
+  min-width: 90px;
+  display: inline-block;
+}
+
+.employee-modal .info-value {
+  font-weight: 600;
+  color: #2c3e50;
+}
+
+.employee-modal .input-section {
+  background: #f4f8fb;
+  border-radius: 10px;
+  padding: 1.2rem 1rem;
+  margin-bottom: 1.2rem;
+  box-shadow: 0 1px 4px rgba(52, 152, 219, 0.04);
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.employee-modal select {
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  border: 1.5px solid #d0d7de;
+  font-size: 1rem;
+  background: #fff;
+  transition: border-color 0.2s;
+}
+.employee-modal select:focus {
+  border-color: #2980b9;
+  outline: none;
+}
+
+.employee-modal .modal-btn-row {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  margin-top: 1.5rem;
+}
+
+.employee-modal .attendance-btn {
+  padding: 0.7rem 2.2rem;
+  border-radius: 8px;
+  font-size: 1.1rem;
+  font-weight: 700;
+  border: none;
+  cursor: pointer;
+  background: #3498db;
+  color: #fff;
+  transition: background 0.2s, transform 0.1s;
+  box-shadow: 0 2px 8px rgba(52, 152, 219, 0.08);
+}
+.employee-modal .attendance-btn:disabled {
+  background: #b2bec3;
+  cursor: not-allowed;
+}
+.employee-modal .attendance-btn:hover:not(:disabled) {
+  background: #2980b9;
+  transform: translateY(-2px) scale(1.03);
+}
+
+.input-section-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #2980b9;
+  text-align: left;
+  letter-spacing: 1px;
+}
+.full-width-select {
+  width: 100%;
+  box-sizing: border-box;
 }
 </style>
 

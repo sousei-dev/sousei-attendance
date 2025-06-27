@@ -16,7 +16,7 @@ const getDefaultStartDate = () => {
   // 이전 달 21일부터
   const lastMonth = currentMonth === 0 ? 11 : currentMonth - 1
   const lastYear = currentMonth === 0 ? currentYear - 1 : currentYear
-  return new Date(lastYear, lastMonth, 22).toISOString().split('T')[0]
+  return new Date(lastYear, lastMonth, 12).toISOString().split('T')[0]
 }
 
 const getDefaultEndDate = () => {
@@ -25,7 +25,7 @@ const getDefaultEndDate = () => {
   const currentYear = today.getFullYear()
   
   // 현재 달 20일까지
-  return new Date(currentYear, currentMonth, 21).toISOString().split('T')[0]
+  return new Date(currentYear, currentMonth, 11).toISOString().split('T')[0]
 }
 
 const startDate = ref(getDefaultStartDate())
@@ -176,8 +176,16 @@ const calculateWorkHours = (checkInTime: string | null, checkOutTime: string | n
 }
 
 // 휴식시간을 제외한 근무시간 계산 함수
-const calculateNetWorkHours = (checkInTime: string | null, checkOutTime: string | null, breakTime: string | null, isHoliday: boolean = false) => {
+const calculateNetWorkHours = (checkInTime: string | null, checkOutTime: string | null, breakTime: string | null, isHoliday: boolean = false, scheduledCheckIn: string | null = null, scheduledCheckOut: string | null = null) => {
   if (!checkInTime || !checkOutTime) return 0
+  
+  // 야간근무 여부 확인 (16:30 ~ 다음날 09:30) - 예상 출퇴근시간 기준
+  const isNightShift = isNightShiftWork(checkInTime, checkOutTime, scheduledCheckIn, scheduledCheckOut)
+  
+  // 야간근무인 경우 14시간으로 고정
+  if (isNightShift) {
+    return 14
+  }
   
   const totalWorkHours = calculateWorkHours(checkInTime, checkOutTime)
   
@@ -195,7 +203,7 @@ const calculateNetWorkHours = (checkInTime: string | null, checkOutTime: string 
   const netWorkHours = totalWorkHours - breakTimeHours
   
   // 휴일에 야간근무가 아닌 사람이 8시간 이상 근무한 경우 8시간으로 고정
-  if (isHoliday && !isNightShiftWork(checkInTime, checkOutTime) && netWorkHours >= 8) {
+  if (isHoliday && !isNightShift && netWorkHours >= 8) {
     return 8
   }
   
@@ -211,8 +219,7 @@ const workStats = computed(() => {
   let earlyShiftHours = 0
   let lateShiftHours = 0
   let dayShiftHours = 0
-  let workDays = 0
-  let holidayDays = 0
+  let totalWorkDays = 0
   let nightShiftCount = 0 // 야근근무 횟수
 
   records.forEach(record => {
@@ -240,7 +247,7 @@ const workStats = computed(() => {
       
       // 총 근무시간에서 휴식시간 제외
       const netWorkHours = actualWorkHours - breakTimeHoursForRecord
-      workDays++
+      totalWorkDays++ // 근무일수 카운트 (출퇴근이 있는 경우만)
       
       if (isHolidayWork) {
         // 야간근무가 아닌 경우 9:00~18:00 사이의 근무만 휴일출근시간으로 인정
@@ -280,7 +287,6 @@ const workStats = computed(() => {
           // 야간근무는 전체 시간에서 휴식시간 제외
           holidayWorkHours += netWorkHours
         }
-        holidayDays++
       } else {
         // 평일 근무시간 (휴일이 아닌 경우)
         weekdayWorkHours += netWorkHours
@@ -295,7 +301,8 @@ const workStats = computed(() => {
   })
 
   // 총 근무시간을 분류된 시간들의 합계로 계산
-  const totalWorkHours = earlyShiftHours + lateShiftHours + dayShiftHours + holidayWorkHours
+  const nightShiftHours = nightShiftCount * 14 // 야간근무시간 (1회당 14시간)
+  const totalWorkHours = earlyShiftHours + lateShiftHours + dayShiftHours + nightShiftHours
 
   return {
     totalWorkHours: Math.round(totalWorkHours * 100) / 100,
@@ -305,9 +312,7 @@ const workStats = computed(() => {
     earlyShiftHours: Math.round(earlyShiftHours * 100) / 100,
     lateShiftHours: Math.round(lateShiftHours * 100) / 100,
     dayShiftHours: Math.round(dayShiftHours * 100) / 100,
-    workDays,
-    holidayDays,
-    totalDays: workDays + holidayDays,
+    totalDays: totalWorkDays,
     nightShiftCount // 야근근무 횟수 추가
   }
 })
@@ -329,6 +334,7 @@ const calculateShiftHours = (checkInTime: string | null, checkOutTime: string | 
   }
   
   // 퇴근시간이 출근시간보다 작으면 다음날로 간주 (야간근무)
+  
   let workEndMinutes = checkOutMinutes
   if (workEndMinutes <= checkInMinutes) {
     workEndMinutes += 24 * 60 // 24시간 추가
@@ -445,8 +451,8 @@ const formatDate = (dateString: string) => {
 const formatTime = (timeString: string | null) => {
   if (!timeString) return '-'
   
-  // 30분 단위로 반올림하여 표시
-  return roundToNearestHalfHour(timeString)
+  // 원본 시간값을 그대로 표시 (30분 반올림 제거)
+  return timeString
 }
 
 // 근무 상태 텍스트
@@ -602,6 +608,12 @@ const isCheckOutTimeDifferent = (record: AttendanceRecord) => {
           <span class="label">職種:</span>
           <span class="value">{{ selectedEmployee.category_1 }}</span>
         </div>
+        <div class="detail-item">
+          <span class="label">給与形態:</span>
+          <span class="value">
+            {{ selectedEmployee.salary_type === 'monthly' ? '日給月給制' : selectedEmployee.salary_type === 'hourly' ? '時間給制' : '-' }}
+          </span>
+        </div>
       </div>
     </div>
 
@@ -658,13 +670,14 @@ const isCheckOutTimeDifferent = (record: AttendanceRecord) => {
           <div class="stat-content">
             <div class="stat-number">{{ workStats.holidayWorkHours }}時間</div>
             <div class="stat-label">休日出勤時間</div>
+            <div class="stat-subtitle">+30円計算：<span class="red-font">{{ workStats.holidayWorkHours * 30 }}円</span></div>
           </div>
         </div>
           <div class="stat-card shift-card">
             <div class="stat-icon">🌙</div>
             <div class="stat-content">
-              <div class="stat-number">{{ workStats.nightShiftCount }}回</div>
-              <div class="stat-label">夜勤勤務回数</div>
+              <div class="stat-number">{{ workStats.nightShiftCount }} / {{ workStats.nightShiftCount * 14 }}時間</div>
+              <div class="stat-label">夜勤勤務回数 / 時間</div>
               <div class="stat-subtitle">16:30～翌日09:30</div>
             </div>
           </div>
@@ -679,61 +692,59 @@ const isCheckOutTimeDifferent = (record: AttendanceRecord) => {
         選択された期間の勤務記録がありません。
       </div>
       <div v-else class="records-table">
-        <div class="table-header">
-          <div class="header-cell">日付</div>
-          <div class="header-cell">予想出勤</div>
-          <div class="header-cell">予想退勤</div>
-          <div class="header-cell">休憩時間</div>
-          <div class="header-cell">出勤時間</div>
-          <div class="header-cell">退勤時間</div>
-          <div class="header-cell">早出</div>
-          <div class="header-cell">遅出</div>
-          <div class="header-cell">日勤</div>
-          <div class="header-cell">勤務時間</div>
-          <div class="header-cell">状態</div>
-        </div>
-        
-        <div class="table-body">
-          <div 
-            v-for="record in selectedPeriodRecords" 
-            :key="record.id" 
-            class="record-row"
-            :class="{ 
-              timeDifference: isCheckInTimeDifferent(record) || isCheckOutTimeDifferent(record)
-            }"
-          >
-            <div class="cell date-cell">{{ formatDate(record.date) }}</div>
-            <div class="cell expected-checkin">{{ formatTime(record.scheduled_check_in) }}</div>
-            <div class="cell expected-checkout">{{ formatTime(record.scheduled_check_out) }}</div>
-            <div class="cell break-time-cell">{{ formatTime(record.break_time) }}</div>
-            <div class="cell checkin-cell">
-              <div :class="{ 'time-display': !getCheckInDifferenceText(record), 'time-difference': getCheckInDifferenceText(record) }">{{ formatTime(record.check_in) }}</div>
-            </div>
-            <div class="cell checkout-cell">
-              <div :class="{ 'time-display': !getCheckOutDifferenceText(record), 'time-difference': getCheckOutDifferenceText(record) }">{{ formatTime(record.check_out) }}</div>
-            </div>
-            <div class="cell shift-hours-cell">
-              {{ (() => { const hours = calculateShiftHours(record.check_in, record.check_out, record.break_time, isHoliday(record.date), record.scheduled_check_in, record.scheduled_check_out); return hours.early > 0 ? `${hours.early.toFixed(1)}時間` : '-'; })() }}
-            </div>
-            <div class="cell shift-hours-cell">
-              {{ (() => { const hours = calculateShiftHours(record.check_in, record.check_out, record.break_time, isHoliday(record.date), record.scheduled_check_in, record.scheduled_check_out); return hours.late > 0 ? `${hours.late.toFixed(1)}時間` : '-'; })() }}
-            </div>
-            <div class="cell shift-hours-cell">
-              {{ (() => { const hours = calculateShiftHours(record.check_in, record.check_out, record.break_time, isHoliday(record.date), record.scheduled_check_in, record.scheduled_check_out); return hours.day > 0 ? `${hours.day.toFixed(1)}時間` : '-'; })() }}
-            </div>
-            <div class="cell hours-cell">
-              {{ record.check_in && record.check_out ? `${calculateNetWorkHours(record.check_in, record.check_out, record.break_time, isHoliday(record.date)).toFixed(1)}時間` : '-' }}
-            </div>
-            <div class="cell status-cell">
-              <span 
-                class="status-badge"
-                :style="{ backgroundColor: getWorkStatusColor(record) }"
-              >
-                {{ getWorkStatusText(record) }}
-              </span>
-            </div>
-          </div>
-        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>日付</th>
+              <th>予想出勤</th>
+              <th>予想退勤</th>
+              <th>休憩時間</th>
+              <th>出勤時間</th>
+              <th>退勤時間</th>
+              <th>早出</th>
+              <th>遅出</th>
+              <th>日勤</th>
+              <th>勤務時間</th>
+              <th>状態</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="record in selectedPeriodRecords" :key="record.id"
+                :class="{ timeDifference: isCheckInTimeDifferent(record) || isCheckOutTimeDifferent(record) }">
+              <td>{{ formatDate(record.date) }}</td>
+              <td>{{ formatTime(record.scheduled_check_in) }}</td>
+              <td>{{ formatTime(record.scheduled_check_out) }}</td>
+              <td>{{ formatTime(record.break_time) }}</td>
+              <td>
+                <span :class="{ 'time-display': !getCheckInDifferenceText(record), 'time-difference': getCheckInDifferenceText(record) }">
+                  {{ formatTime(record.check_in) }}
+                </span>
+              </td>
+              <td>
+                <span :class="{ 'time-display': !getCheckOutDifferenceText(record), 'time-difference': getCheckOutDifferenceText(record) }">
+                  {{ formatTime(record.check_out) }}
+                </span>
+              </td>
+              <td>
+                {{ (() => { const hours = calculateShiftHours(record.check_in, record.check_out, record.break_time, isHoliday(record.date), record.scheduled_check_in, record.scheduled_check_out); return hours.early > 0 ? `${hours.early.toFixed(1)}時間` : '-'; })() }}
+              </td>
+              <td>
+                {{ (() => { const hours = calculateShiftHours(record.check_in, record.check_out, record.break_time, isHoliday(record.date), record.scheduled_check_in, record.scheduled_check_out); return hours.late > 0 ? `${hours.late.toFixed(1)}時間` : '-'; })() }}
+              </td>
+              <td>
+                {{ (() => { const hours = calculateShiftHours(record.check_in, record.check_out, record.break_time, isHoliday(record.date), record.scheduled_check_in, record.scheduled_check_out); return hours.day > 0 ? `${hours.day.toFixed(1)}時間` : '-'; })() }}
+              </td>
+              <td>
+                {{ record.check_in && record.check_out ? `${calculateNetWorkHours(record.check_in, record.check_out, record.break_time, isHoliday(record.date), record.scheduled_check_in, record.scheduled_check_out).toFixed(1)}時間` : '-' }}
+              </td>
+              <td>
+                <span class="status-badge" :style="{ backgroundColor: getWorkStatusColor(record) }">
+                  {{ getWorkStatusText(record) }}
+                </span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
   </div>
@@ -1019,74 +1030,37 @@ const isCheckOutTimeDifferent = (record: AttendanceRecord) => {
 .records-table {
   width: 100%;
   overflow-x: auto;
+  min-width: 0;
+  display: block;
 }
 
-.table-header {
-  display: grid;
-  grid-template-columns: 1.1fr 0.8fr 0.8fr 0.8fr 0.8fr 1fr 1fr 1fr 1fr 1fr 1fr;
-  gap: 1rem;
-  padding: 1rem;
-  background: #f8f9fa;
-  border-radius: 8px;
-  margin-bottom: 0.5rem;
-  font-weight: 600;
-  color: #2c3e50;
+.records-table table {
+  min-width: 1200px;
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
 }
 
-.header-cell {
-  padding: 0.5rem;
+.records-table th, .records-table td {
+  white-space: nowrap;
+  padding: 0.5rem 1rem;
   text-align: left;
-  font-size: 0.9rem;
+  font-size: 0.95rem;
+  color: #2c3e50;
+  background: #fff;
 }
 
-.table-body {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
+.records-table th {
+  background: #f8f9fa;
+  font-weight: 600;
 }
 
-.record-row {
-  display: grid;
-  grid-template-columns: 1.1fr 0.8fr 0.8fr 0.8fr 0.8fr 1fr 1fr 1fr 1fr 1fr 1fr;
-  gap: 1rem;
-  padding: 1rem;
-  background: rgba(255, 255, 255, 0.8);
-  border-radius: 8px;
-  align-items: center;
-  transition: all 0.3s ease;
+.records-table tr {
+  background: rgba(255,255,255,0.8);
 }
 
-.record-row:hover {
-  background: rgba(255, 255, 255, 1);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
-}
-
-.record-row.holiday {
-  background: rgba(255, 248, 220, 0.8);
-  border-left: 4px solid #f39c12;
-}
-
-.record-row.holiday:hover {
-  background: rgba(255, 248, 220, 1);
-}
-
-.record-row.publicHoliday {
-  background: rgba(255, 235, 235, 0.8);
-  border-left: 4px solid #e74c3c;
-}
-
-.record-row.publicHoliday:hover {
-  background: rgba(255, 235, 235, 1);
-}
-
-.record-row.timeDifference {
+:deep(tr.timeDifference) > td {
   background: rgba(231, 76, 60, 0.1);
-  border-left: 4px solid #e74c3c;
-}
-
-.record-row.timeDifference:hover {
-  background: rgba(231, 76, 60, 0.15);
 }
 
 .cell {
@@ -1207,6 +1181,10 @@ const isCheckOutTimeDifferent = (record: AttendanceRecord) => {
   color: #95a5a6;
   margin-top: 0.1rem;
   font-weight: 500;
+}
+
+.red-font {
+  color: #e74c3c;
 }
 
 .shift-hours-cell {
@@ -1453,5 +1431,14 @@ const isCheckOutTimeDifferent = (record: AttendanceRecord) => {
     color: #2c3e50;
     margin-right: 1rem;
   }
+}
+
+.records-table th:first-child,
+.records-table td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: #f8f9fa;
+  box-shadow: 2px 0 4px -2px #eee;
 }
 </style> 
