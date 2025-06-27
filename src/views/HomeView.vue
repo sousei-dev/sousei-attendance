@@ -631,7 +631,7 @@ const closeEmployeeModal = () => {
       <div class="employee-modal">
         <button class="close-btn" @click="closeEmployeeModal" title="닫기">×</button>
         <h3>従業員詳細</h3>
-        <div v-if="selectedEmployeeForModal">
+        <div v-if="selectedEmployeeForModal" class="employee-modal-content">
           <div class="info-section">
             <div><span class="info-label">従業員番号:</span> <span class="info-value">{{ selectedEmployeeForModal.employee_code }}</span></div>
             <div><span class="info-label">従業員名:</span> <span class="info-value">{{ selectedEmployeeForModal.last_name }}{{ selectedEmployeeForModal.first_name }}</span></div>
@@ -687,7 +687,8 @@ const closeEmployeeModal = () => {
               </span>
             </div>
           </div>
-          <div class="modal-btn-row">
+        </div>
+        <div class="modal-btn-row">
             <button
               @click="handleAttendanceAction(selectedEmployeeForModal.id)"
               :disabled="isButtonDisabled(selectedEmployeeForModal.id) || store.loading"
@@ -697,7 +698,6 @@ const closeEmployeeModal = () => {
               {{ getButtonText(getEmployeeStatus(selectedEmployeeForModal.id)) }}
             </button>
           </div>
-        </div>
       </div>
     </div>
   </div>
@@ -708,6 +708,7 @@ const closeEmployeeModal = () => {
   width: 100%;
   margin: 0 auto;
   box-sizing: border-box;
+  font-size: 1.1rem;
 }
 
 .loading-overlay {
@@ -723,16 +724,17 @@ const closeEmployeeModal = () => {
   justify-content: center;
   z-index: 1000;
   color: white;
+  font-size: 1.3rem;
 }
 
 .loading-overlay .loading-spinner {
-  width: 50px;
-  height: 50px;
-  border: 4px solid rgba(255, 255, 255, 0.3);
-  border-top: 4px solid white;
+  width: 70px;
+  height: 70px;
+  border: 5px solid rgba(255, 255, 255, 0.3);
+  border-top: 5px solid white;
   border-radius: 50%;
   animation: spin 1s linear infinite;
-  margin-bottom: 1rem;
+  margin-bottom: 1.5rem;
 }
 
 @keyframes spin {
@@ -747,51 +749,52 @@ const closeEmployeeModal = () => {
 .error-message {
   background: #f8d7da;
   color: #721c24;
-  padding: 1rem 2rem;
-  margin: 1rem 2rem;
-  border-radius: 8px;
-  border: 1px solid #f5c6cb;
+  padding: 1.5rem 3rem;
+  margin: 1.5rem 2rem;
+  border-radius: 12px;
+  border: 2px solid #f5c6cb;
   text-align: center;
   font-weight: 500;
+  font-size: 1.2rem;
 }
 
 .dashboard-header,
 .employees-section,
 .recent-activity {
-  border-radius: 16px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
-  margin: 0 0 2rem 0;
+  border-radius: 20px;
+  box-shadow: 0 6px 25px rgba(0, 0, 0, 0.1);
+  margin: 0 0 3rem 0;
   width: 100%;
-  padding-left: 2rem;
-  padding-right: 2rem;
+  padding-left: 3rem;
+  padding-right: 3rem;
 }
 
 .dashboard-header {
   min-width: 0;
   background: rgba(255, 255, 255, 0.9);
-  padding: 2rem;
-  margin-bottom: 2rem;
-  border-radius: 16px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+  padding: 3rem;
+  margin-bottom: 3rem;
+  border-radius: 20px;
+  box-shadow: 0 6px 25px rgba(0, 0, 0, 0.1);
 }
 
 .header-content {
   display: flex;
   align-items: center;
-  gap: 5rem;
+  gap: 6rem;
   flex-wrap: wrap;
 }
 
 .header-left {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 1.5rem;
 }
 
 .dashboard-header h1 {
   margin: 0;
   color: #2c3e50;
-  font-size: 1.8rem;
+  font-size: 2.5rem;
   font-weight: 600;
   white-space: nowrap;
 }
@@ -801,43 +804,43 @@ const closeEmployeeModal = () => {
 }
 
 .time {
-  font-size: 2rem;
+  font-size: 2.5rem;
   font-weight: 700;
   color: #667eea;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.8rem;
   white-space: nowrap;
 }
 
 .date {
-  font-size: 1rem;
+  font-size: 1.3rem;
   color: #7f8c8d;
   white-space: nowrap;
 }
 
 .stats-overview {
   display: flex;
-  gap: 2.5rem;
+  gap: 3rem;
   flex-wrap: wrap;
 }
 
 .stat-item {
   display: flex;
   align-items: center;
-  gap: 1.75rem;
+  gap: 2rem;
   background: rgba(255, 255, 255, 0.8);
-  padding: 1.5rem;
-  border-radius: 12px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+  padding: 2rem;
+  border-radius: 16px;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
   transition: transform 0.3s ease;
-  min-width: 300px;
+  min-width: 350px;
 }
 
 .stat-item:hover {
-  transform: translateY(-2px);
+  transform: translateY(-3px);
 }
 
 .stat-icon {
-  font-size: 2.5rem;
+  font-size: 3rem;
   flex-shrink: 0;
 }
 
@@ -847,14 +850,14 @@ const closeEmployeeModal = () => {
 }
 
 .stat-number {
-  font-size: 1.5rem;
+  font-size: 2rem;
   font-weight: 700;
   color: #2c3e50;
   line-height: 1;
 }
 
 .stat-label {
-  font-size: 1.5rem;
+  font-size: 1.3rem;
   color: #7f8c8d;
   white-space: nowrap;
 }
@@ -863,60 +866,60 @@ const closeEmployeeModal = () => {
 .employees-section {
   min-width: 0;
   background: rgba(255, 255, 255, 0.9);
-  padding: 2rem;
-  margin-bottom: 2rem;
-  border-radius: 16px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+  padding: 3rem;
+  margin-bottom: 3rem;
+  border-radius: 20px;
+  box-shadow: 0 6px 25px rgba(0, 0, 0, 0.1);
 }
 
 .section-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 1.5rem;
+  margin-bottom: 2rem;
   flex-wrap: wrap;
-  gap: 1rem;
+  gap: 1.5rem;
 }
 
 .section-header h2 {
   margin: 0;
   color: #2c3e50;
-  font-size: 1.5rem;
+  font-size: 2rem;
   font-weight: 600;
 }
 
 .header-controls {
   display: flex;
-  gap: 1rem;
+  gap: 1.5rem;
   flex-wrap: wrap;
   align-items: flex-end;
 }
 
 .time-settings {
   display: flex;
-  gap: 1rem;
+  gap: 1.5rem;
   flex-wrap: wrap;
 }
 
 .time-setting-item {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.8rem;
 }
 
 .time-setting-item label {
-  font-size: 0.9rem;
+  font-size: 1.1rem;
   font-weight: 600;
   color: #2c3e50;
   white-space: nowrap;
 }
 
 .time-select {
-  width: 120px;
-  padding: 0.75rem;
-  border: 2px solid #e0e0e0;
-  border-radius: 8px;
-  font-size: 1rem;
+  width: 140px;
+  padding: 1rem;
+  border: 3px solid #e0e0e0;
+  border-radius: 12px;
+  font-size: 1.2rem;
   background: white;
   transition: border-color 0.3s ease;
   cursor: pointer;
@@ -933,10 +936,10 @@ const closeEmployeeModal = () => {
 
 .time-select-small {
   width: 100%;
-  padding: 0.5rem;
-  border: 1px solid #e0e0e0;
-  border-radius: 6px;
-  font-size: 0.85rem;
+  padding: 0.8rem;
+  border: 2px solid #e0e0e0;
+  border-radius: 10px;
+  font-size: 1.1rem;
   background: white;
   transition: border-color 0.3s ease;
   cursor: pointer;
@@ -964,15 +967,15 @@ const closeEmployeeModal = () => {
 
 .search-box {
   position: relative;
-  min-width: 300px;
+  min-width: 400px;
 }
 
 .search-input {
   width: 100%;
-  padding: 0.75rem 1rem 0.75rem 2.5rem;
-  border: 2px solid #e0e0e0;
-  border-radius: 8px;
-  font-size: 1rem;
+  padding: 1rem 1rem 1rem 3rem;
+  border: 3px solid #e0e0e0;
+  border-radius: 12px;
+  font-size: 1.2rem;
   background: white;
   transition: border-color 0.3s ease;
 }
@@ -984,11 +987,11 @@ const closeEmployeeModal = () => {
 
 .search-icon {
   position: absolute;
-  left: 0.75rem;
+  left: 1rem;
   top: 50%;
   transform: translateY(-50%);
   color: #7f8c8d;
-  font-size: 1rem;
+  font-size: 1.3rem;
 }
 
 .employees-table {
@@ -999,34 +1002,35 @@ const closeEmployeeModal = () => {
 .table-header {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr 1fr 1fr;
-  gap: 1rem;
-  padding: 1rem;
+  gap: 1.5rem;
+  padding: 1.5rem;
   background: #f8f9fa;
-  border-radius: 8px;
-  margin-bottom: 0.5rem;
+  border-radius: 12px;
+  margin-bottom: 1rem;
   font-weight: 600;
   color: #2c3e50;
+  font-size: 1.2rem;
 }
 
 .header-cell {
-  padding: 0.5rem;
+  padding: 1rem;
   text-align: left;
-  font-size: 0.9rem;
+  font-size: 1.1rem;
 }
 
 .employee-rows {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 1rem;
 }
 
 .employee-row {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr 1fr 1fr;
-  gap: 1rem;
-  padding: 1rem;
+  gap: 1.5rem;
+  padding: 1.5rem;
   background: rgba(255, 255, 255, 0.8);
-  border-radius: 8px;
+  border-radius: 12px;
   align-items: center;
   transition: all 0.3s ease;
   cursor: pointer;
@@ -1034,14 +1038,14 @@ const closeEmployeeModal = () => {
 
 .employee-row:hover {
   background: rgba(255, 255, 255, 1);
-  transform: translateY(-2px);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
-  border: 2px solid #667eea;
+  transform: translateY(-3px);
+  box-shadow: 0 6px 25px rgba(0, 0, 0, 0.15);
+  border: 3px solid #667eea;
 }
 
 .cell {
-  padding: 0.5rem;
-  font-size: 0.9rem;
+  padding: 1rem;
+  font-size: 1.1rem;
 }
 
 .employee-code {
@@ -1071,31 +1075,31 @@ const closeEmployeeModal = () => {
 }
 
 .status-badge {
-  padding: 0.5rem 1rem;
-  border-radius: 25px;
+  padding: 0.8rem 1.5rem;
+  border-radius: 30px;
   color: white;
-  font-size: 0.9rem;
+  font-size: 1rem;
   font-weight: 600;
   text-align: center;
   white-space: nowrap;
-  min-width: 80px;
-  min-height: 35px;
+  min-width: 100px;
+  min-height: 45px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
 }
 
 .attendance-btn {
-  padding: 0.75rem 1.5rem;
+  padding: 1rem 2rem;
   border: none;
-  border-radius: 8px;
-  font-size: 1rem;
+  border-radius: 12px;
+  font-size: 1.2rem;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.3s ease;
   white-space: nowrap;
-  min-width: 100px;
-  min-height: 45px;
+  min-width: 120px;
+  min-height: 55px;
 }
 
 .attendance-btn.check-in {
@@ -1105,7 +1109,7 @@ const closeEmployeeModal = () => {
 
 .attendance-btn.check-in:hover:not(:disabled) {
   background: #5a6fd8;
-  transform: translateY(-1px);
+  transform: translateY(-2px);
 }
 
 .attendance-btn.check-out {
@@ -1115,7 +1119,7 @@ const closeEmployeeModal = () => {
 
 .attendance-btn.check-out:hover:not(:disabled) {
   background: #c0392b;
-  transform: translateY(-1px);
+  transform: translateY(-2px);
 }
 
 .attendance-btn.disabled {
@@ -1132,74 +1136,77 @@ const closeEmployeeModal = () => {
   text-align: center;
   color: #7f8c8d;
   font-style: italic;
-  padding: 2rem;
+  padding: 3rem;
   background: rgba(255, 255, 255, 0.8);
-  border-radius: 8px;
+  border-radius: 12px;
+  font-size: 1.3rem;
 }
 
 .recent-activity {
   min-width: 0;
   background: rgba(255, 255, 255, 0.9);
-  padding: 2rem;
-  border-radius: 16px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+  padding: 3rem;
+  border-radius: 20px;
+  box-shadow: 0 6px 25px rgba(0, 0, 0, 0.1);
 }
 
 .recent-activity h2 {
-  margin: 0 0 1rem 0;
+  margin: 0 0 1.5rem 0;
   color: #2c3e50;
-  font-size: 1.3rem;
+  font-size: 1.8rem;
 }
 
 .activity-list {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 1rem;
 }
 
 .no-records {
   text-align: center;
   color: #7f8c8d;
   font-style: italic;
-  padding: 1.5rem;
+  padding: 2rem;
+  font-size: 1.2rem;
 }
 
 .activity-item {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 1rem;
+  padding: 1.5rem;
   background: rgba(255, 255, 255, 0.5);
-  border-radius: 12px;
-  border-left: 4px solid #667eea;
+  border-radius: 16px;
+  border-left: 5px solid #667eea;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  gap: 1rem;
 }
 
 .employee-info {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
-  min-width: 120px;
+  gap: 0.5rem;
+  min-width: 150px;
 }
 
 .employee-name {
   font-weight: 600;
   color: #2c3e50;
   white-space: nowrap;
+  font-size: 1.1rem;
 }
 
 .employee-dept {
-  font-size: 0.85rem;
+  font-size: 1rem;
   color: #7f8c8d;
   white-space: nowrap;
 }
 
 .attendance-info {
   display: flex;
-  gap: 0.75rem;
+  gap: 1rem;
   align-items: center;
-  font-size: 0.85rem;
+  font-size: 1rem;
   flex-wrap: wrap;
 }
 
@@ -1224,18 +1231,19 @@ const closeEmployeeModal = () => {
 @media (max-width: 768px) {
   .dashboard {
     padding: 0;
+    font-size: 1.2rem;
   }
 
   .dashboard-header,
   .employees-section,
   .recent-activity {
-    margin: 0 0 1.5rem 0;
-    padding: 1.5rem;
+    margin: 0 0 2rem 0;
+    padding: 2rem;
   }
 
   .header-content {
     flex-direction: column;
-    gap: 1.5rem;
+    gap: 2rem;
     text-align: center;
   }
 
@@ -1244,33 +1252,33 @@ const closeEmployeeModal = () => {
   }
 
   .dashboard-header h1 {
-    font-size: 1.5rem;
+    font-size: 2rem;
   }
 
   .time {
-    font-size: 1.5rem;
+    font-size: 2rem;
   }
 
   .date {
-    font-size: 0.9rem;
+    font-size: 1.1rem;
   }
 
   .stats-overview {
     justify-content: center;
-    gap: 1rem;
+    gap: 1.5rem;
   }
 
   .stat-item {
-    min-width: 100px;
-    padding: 0.75rem;
+    min-width: 150px;
+    padding: 1.5rem;
   }
 
   .stat-icon {
-    font-size: 1.2rem;
+    font-size: 2.5rem;
   }
 
   .stat-number {
-    font-size: 1.2rem;
+    font-size: 1.8rem;
   }
 
   .section-header {
@@ -1280,7 +1288,7 @@ const closeEmployeeModal = () => {
 
   .header-controls {
     flex-direction: column;
-    gap: 1rem;
+    gap: 1.5rem;
   }
 
   .time-settings {
@@ -1288,7 +1296,7 @@ const closeEmployeeModal = () => {
   }
 
   .time-setting-item {
-    min-width: 120px;
+    min-width: 140px;
   }
 
   .search-box {
@@ -1298,7 +1306,7 @@ const closeEmployeeModal = () => {
   .table-header,
   .employee-row {
     grid-template-columns: 1fr;
-    gap: 0.5rem;
+    gap: 1rem;
   }
 
   .header-cell {
@@ -1309,21 +1317,22 @@ const closeEmployeeModal = () => {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 0.5rem 0;
-    border-bottom: 1px solid #e0e0e0;
+    padding: 1rem 0;
+    border-bottom: 2px solid #e0e0e0;
   }
 
   .cell::before {
     content: attr(data-label);
     font-weight: 600;
     color: #2c3e50;
-    margin-right: 1rem;
+    margin-right: 1.5rem;
+    font-size: 1.2rem;
   }
 
   .activity-item {
     flex-direction: column;
     align-items: flex-start;
-    gap: 0.5rem;
+    gap: 1rem;
   }
 
   .attendance-info {
@@ -1336,16 +1345,16 @@ const closeEmployeeModal = () => {
   .dashboard-header,
   .employees-section,
   .recent-activity {
-    margin: 0 0 1rem 0;
-    padding: 1rem;
+    margin: 0 0 1.5rem 0;
+    padding: 1.5rem;
   }
 
   .dashboard-header h1 {
-    font-size: 1.3rem;
+    font-size: 1.8rem;
   }
 
   .time {
-    font-size: 1.3rem;
+    font-size: 1.8rem;
   }
 
   .stats-overview {
@@ -1355,7 +1364,7 @@ const closeEmployeeModal = () => {
 
   .stat-item {
     width: 100%;
-    max-width: 200px;
+    max-width: 300px;
   }
 
   .table-header,
@@ -1364,7 +1373,7 @@ const closeEmployeeModal = () => {
   }
 
   .recent-activity h2 {
-    font-size: 1.2rem;
+    font-size: 1.5rem;
   }
 }
 
@@ -1379,13 +1388,17 @@ const closeEmployeeModal = () => {
 }
 .employee-modal {
   background: #fff;
-  border-radius: 18px;
-  padding: 2.5rem 2rem 2rem 2rem;
-  min-width: 340px;
+  border-radius: 20px;
+  padding: 3rem 2.5rem 2.5rem 2.5rem;
+  min-width: 400px;
   max-width: 95vw;
-  box-shadow: 0 8px 32px rgba(52, 152, 219, 0.15), 0 1.5px 8px rgba(44, 62, 80, 0.08);
+  box-shadow: 0 10px 40px rgba(52, 152, 219, 0.15), 0 2px 10px rgba(44, 62, 80, 0.08);
   position: relative;
   animation: modalPop 0.25s cubic-bezier(.4,1.6,.6,1) both;
+}
+.employee-modal-content {
+  height: 550px;
+  overflow: scroll;
 }
 
 @keyframes modalPop {
@@ -1395,8 +1408,8 @@ const closeEmployeeModal = () => {
 
 .employee-modal h3 {
   margin-top: 0;
-  margin-bottom: 1.5rem;
-  font-size: 1.3rem;
+  margin-bottom: 2rem;
+  font-size: 1.8rem;
   color: #2980b9;
   font-weight: 700;
   letter-spacing: 1px;
@@ -1405,11 +1418,11 @@ const closeEmployeeModal = () => {
 
 .employee-modal .close-btn {
   position: absolute;
-  top: 1.2rem;
-  right: 1.2rem;
+  top: 1.5rem;
+  right: 1.5rem;
   background: none;
   border: none;
-  font-size: 1.5rem;
+  font-size: 2rem;
   color: #aaa;
   cursor: pointer;
   transition: color 0.2s;
@@ -1420,43 +1433,45 @@ const closeEmployeeModal = () => {
 
 .employee-modal .info-section {
   background: #f8f9fa;
-  border-radius: 10px;
-  padding: 1.2rem 1rem;
-  margin-bottom: 1.2rem;
-  box-shadow: 0 1px 4px rgba(52, 152, 219, 0.05);
+  border-radius: 12px;
+  padding: 1.5rem 1.2rem;
+  margin-bottom: 1.5rem;
+  box-shadow: 0 2px 6px rgba(52, 152, 219, 0.05);
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.8rem;
 }
 
 .employee-modal .info-label {
   font-weight: 600;
   color: #7f8c8d;
-  min-width: 90px;
+  min-width: 120px;
   display: inline-block;
+  font-size: 1.1rem;
 }
 
 .employee-modal .info-value {
   font-weight: 600;
   color: #2c3e50;
+  font-size: 1.2rem;
 }
 
 .employee-modal .input-section {
   background: #f4f8fb;
-  border-radius: 10px;
-  padding: 1.2rem 1rem;
-  margin-bottom: 1.2rem;
-  box-shadow: 0 1px 4px rgba(52, 152, 219, 0.04);
+  border-radius: 12px;
+  padding: 1.5rem 1.2rem;
+  margin-bottom: 1.5rem;
+  box-shadow: 0 2px 6px rgba(52, 152, 219, 0.04);
   display: flex;
   flex-direction: column;
-  gap: 0.7rem;
+  gap: 1rem;
 }
 
 .employee-modal select {
-  padding: 0.5rem 1rem;
-  border-radius: 6px;
-  border: 1.5px solid #d0d7de;
-  font-size: 1rem;
+  padding: 0.8rem 1.2rem;
+  border-radius: 8px;
+  border: 2px solid #d0d7de;
+  font-size: 1.1rem;
   background: #fff;
   transition: border-color 0.2s;
 }
@@ -1467,22 +1482,23 @@ const closeEmployeeModal = () => {
 
 .employee-modal .modal-btn-row {
   display: flex;
-  gap: 1rem;
+  gap: 1.5rem;
   justify-content: center;
-  margin-top: 1.5rem;
+  margin-top: 2rem;
 }
 
 .employee-modal .attendance-btn {
-  padding: 0.7rem 2.2rem;
-  border-radius: 8px;
-  font-size: 1.1rem;
+  padding: 1rem 2.5rem;
+  border-radius: 10px;
+  font-size: 1.3rem;
   font-weight: 700;
   border: none;
   cursor: pointer;
   background: #3498db;
   color: #fff;
   transition: background 0.2s, transform 0.1s;
-  box-shadow: 0 2px 8px rgba(52, 152, 219, 0.08);
+  box-shadow: 0 3px 10px rgba(52, 152, 219, 0.08);
+  min-height: 60px;
 }
 .employee-modal .attendance-btn:disabled {
   background: #b2bec3;
@@ -1490,11 +1506,11 @@ const closeEmployeeModal = () => {
 }
 .employee-modal .attendance-btn:hover:not(:disabled) {
   background: #2980b9;
-  transform: translateY(-2px) scale(1.03);
+  transform: translateY(-3px) scale(1.03);
 }
 
 .input-section-title {
-  font-size: 1.1rem;
+  font-size: 1.3rem;
   font-weight: 700;
   color: #2980b9;
   text-align: left;

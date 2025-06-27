@@ -1,38 +1,79 @@
 <script setup lang="ts">
 import { useSupabaseAttendanceStore } from '../stores/supabaseAttendance'
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import type { AttendanceRecord } from '../lib/supabase'
 import { useRoute } from 'vue-router'
 
 const store = useSupabaseAttendanceStore()
 const route = useRoute()
 
+// 선택된 직원
+const selectedEmployeeId = ref('')
+
 // 날짜 선택
 const getDefaultStartDate = () => {
   const today = new Date()
   const currentMonth = today.getMonth()
   const currentYear = today.getFullYear()
+  const currentDay = today.getDate()
   
-  // 이전 달 21일부터
-  const lastMonth = currentMonth === 0 ? 11 : currentMonth - 1
-  const lastYear = currentMonth === 0 ? currentYear - 1 : currentYear
-  return new Date(lastYear, lastMonth, 12).toISOString().split('T')[0]
+  // 기본값으로 20일 종료 사용 (직원 선택 전)
+  const payPeriodEndType = Number(selectedEmployee.value.pay_period_end_type)
+  let startDate: Date
+  
+  if (payPeriodEndType === 10) {
+    console.log('10일 종료')
+    // 10일 종료: 이전달 11일부터 이번달 10일까지
+    if (currentDay <= 10) {
+      // 현재 1-10일이면 이전달 11일부터
+      const lastMonth = currentMonth === 0 ? 12 : currentMonth - 1
+      const lastYear = currentMonth === 0 ? currentYear - 1 : currentYear
+      startDate = new Date(lastYear, lastMonth - 1, 12)
+    } else {
+      // 현재 11일 이후면 이번달 11일부터
+      startDate = new Date(currentYear, currentMonth - 1, 12)
+    }
+  } else {
+    console.log('20일 종료')
+    // 20일 종료: 이전달 21일부터 이번달 20일까지
+    if (currentDay <= 20) {
+      // 현재 1-20일이면 이전달 21일부터
+      const lastMonth = currentMonth === 0 ? 11 : currentMonth - 1
+      const lastYear = currentMonth === 0 ? currentYear - 1 : currentYear
+      startDate = new Date(lastYear, lastMonth - 1, 22)
+    } else {
+      // 현재 21일 이후면 이번달 21일부터
+      startDate = new Date(currentYear, currentMonth - 1, 22)
+    }
+  }
+  
+  return startDate.toISOString().split('T')[0]
 }
 
 const getDefaultEndDate = () => {
   const today = new Date()
   const currentMonth = today.getMonth()
   const currentYear = today.getFullYear()
+  const currentDay = today.getDate()
   
-  // 현재 달 20일까지
-  return new Date(currentYear, currentMonth, 11).toISOString().split('T')[0]
+  // 기본값으로 20일 종료 사용 (직원 선택 전)
+  const payPeriodEndType = Number(selectedEmployee.value.pay_period_end_type)
+  
+  let endDate: Date
+  
+  if (payPeriodEndType === 10) {
+    // 10일 종료: 이번달 10일까지
+    endDate = new Date(currentYear, currentMonth, 11)
+  } else {
+    // 20일 종료: 이번달 20일까지
+    endDate = new Date(currentYear, currentMonth, 21)
+  }
+  
+  return endDate.toISOString().split('T')[0]
 }
 
-const startDate = ref(getDefaultStartDate())
-const endDate = ref(getDefaultEndDate())
-
-// 선택된 직원
-const selectedEmployeeId = ref('')
+const startDate = ref('')
+const endDate = ref('')
 
 // 로딩 상태
 const loading = ref(false)
@@ -523,6 +564,12 @@ const isCheckOutTimeDifferent = (record: AttendanceRecord) => {
   const diff = getTimeDifference(record.scheduled_check_out, record.check_out)
   return diff >= 30
 }
+
+// 선택된 직원 ID가 변경될 때마다 날짜 범위를 업데이트
+watch(selectedEmployeeId, () => {
+  startDate.value = getDefaultStartDate()
+  endDate.value = getDefaultEndDate()
+})
 </script>
 
 <template>
@@ -611,7 +658,13 @@ const isCheckOutTimeDifferent = (record: AttendanceRecord) => {
         <div class="detail-item">
           <span class="label">給与形態:</span>
           <span class="value">
-            {{ selectedEmployee.salary_type === 'monthly' ? '日給月給制' : selectedEmployee.salary_type === 'hourly' ? '時間給制' : '-' }}
+            {{ selectedEmployee.salary_type === 'monthly' ? '日給月給制(正社員)' : selectedEmployee.salary_type === 'hourly' ? '時間給制(パート)' : '-' }}
+          </span>
+        </div>
+        <div class="detail-item">
+          <span class="label">締切日:</span>
+          <span class="value">
+            {{ selectedEmployee.pay_period_end_type }} 日
           </span>
         </div>
       </div>
@@ -755,7 +808,8 @@ const isCheckOutTimeDifferent = (record: AttendanceRecord) => {
   width: 100%;
   margin: 0 auto;
   box-sizing: border-box;
-  padding: 2rem;
+  padding: 3rem;
+  font-size: 1.1rem;
 }
 
 .loading-overlay {
@@ -771,16 +825,17 @@ const isCheckOutTimeDifferent = (record: AttendanceRecord) => {
   justify-content: center;
   z-index: 1000;
   color: white;
+  font-size: 1.3rem;
 }
 
 .loading-spinner {
-  width: 50px;
-  height: 50px;
-  border: 4px solid rgba(255, 255, 255, 0.3);
-  border-top: 4px solid white;
+  width: 70px;
+  height: 70px;
+  border: 5px solid rgba(255, 255, 255, 0.3);
+  border-top: 5px solid white;
   border-radius: 50%;
   animation: spin 1s linear infinite;
-  margin-bottom: 1rem;
+  margin-bottom: 1.5rem;
 }
 
 @keyframes spin {
@@ -791,46 +846,47 @@ const isCheckOutTimeDifferent = (record: AttendanceRecord) => {
 .error-message {
   background: #f8d7da;
   color: #721c24;
-  padding: 1rem 2rem;
-  margin: 1rem 0;
-  border-radius: 8px;
-  border: 1px solid #f5c6cb;
+  padding: 1.5rem 3rem;
+  margin: 1.5rem 0;
+  border-radius: 12px;
+  border: 2px solid #f5c6cb;
   text-align: center;
   font-weight: 500;
+  font-size: 1.2rem;
 }
 
 .page-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 2rem;
-  padding: 2rem;
+  margin-bottom: 3rem;
+  padding: 3rem;
   background: rgba(255, 255, 255, 0.9);
-  border-radius: 16px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+  border-radius: 20px;
+  box-shadow: 0 6px 25px rgba(0, 0, 0, 0.1);
 }
 
 .page-header h1 {
   margin: 0;
   color: #2c3e50;
-  font-size: 2rem;
+  font-size: 2.5rem;
   font-weight: 600;
 }
 
 .current-time {
-  font-size: 1.2rem;
+  font-size: 1.5rem;
   color: #7f8c8d;
   font-weight: 500;
 }
 
 .control-section {
   background: rgba(255, 255, 255, 0.9);
-  padding: 2rem;
-  border-radius: 16px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
-  margin-bottom: 2rem;
+  padding: 3rem;
+  border-radius: 20px;
+  box-shadow: 0 6px 25px rgba(0, 0, 0, 0.1);
+  margin-bottom: 3rem;
   display: flex;
-  gap: 2rem;
+  gap: 3rem;
   flex-wrap: wrap;
   align-items: flex-end;
 }
@@ -838,20 +894,21 @@ const isCheckOutTimeDifferent = (record: AttendanceRecord) => {
 .employee-selector {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-  min-width: 300px;
+  gap: 1rem;
+  min-width: 400px;
 }
 
 .employee-selector label {
   font-weight: 600;
   color: #2c3e50;
+  font-size: 1.2rem;
 }
 
 .employee-select {
-  padding: 0.75rem;
-  border: 2px solid #e0e0e0;
-  border-radius: 8px;
-  font-size: 1rem;
+  padding: 1rem;
+  border: 3px solid #e0e0e0;
+  border-radius: 12px;
+  font-size: 1.2rem;
   background: white;
   transition: border-color 0.3s ease;
 }
@@ -863,27 +920,28 @@ const isCheckOutTimeDifferent = (record: AttendanceRecord) => {
 
 .date-range-selector {
   display: flex;
-  gap: 1rem;
+  gap: 2rem;
   flex-wrap: wrap;
 }
 
 .date-input {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 1rem;
 }
 
 .date-input label {
   font-weight: 600;
   color: #2c3e50;
   white-space: nowrap;
+  font-size: 1.2rem;
 }
 
 .date-input-field {
-  padding: 0.75rem;
-  border: 2px solid #e0e0e0;
-  border-radius: 8px;
-  font-size: 1rem;
+  padding: 1rem;
+  border: 3px solid #e0e0e0;
+  border-radius: 12px;
+  font-size: 1.2rem;
   background: white;
   transition: border-color 0.3s ease;
 }
@@ -895,79 +953,79 @@ const isCheckOutTimeDifferent = (record: AttendanceRecord) => {
 
 .employee-info {
   background: rgba(255, 255, 255, 0.9);
-  padding: 2rem;
-  border-radius: 16px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
-  margin-bottom: 2rem;
+  padding: 3rem;
+  border-radius: 20px;
+  box-shadow: 0 6px 25px rgba(0, 0, 0, 0.1);
+  margin-bottom: 3rem;
 }
 
 .employee-info h2 {
-  margin: 0 0 1rem 0;
+  margin: 0 0 2rem 0;
   color: #2c3e50;
-  font-size: 1.5rem;
+  font-size: 2rem;
 }
 
 .employee-details {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 1rem;
+  gap: 2rem;
 }
 
 .detail-item {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: 0.5rem;
 }
 
 .detail-item .label {
-  font-size: 0.9rem;
+  font-size: 1.1rem;
   color: #7f8c8d;
   font-weight: 500;
 }
 
 .detail-item .value {
-  font-size: 1.1rem;
+  font-size: 1.4rem;
   color: #2c3e50;
   font-weight: 600;
 }
 
 .work-stats {
   background: rgba(255, 255, 255, 0.9);
-  padding: 2rem;
-  border-radius: 16px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
-  margin-bottom: 2rem;
+  padding: 3rem;
+  border-radius: 20px;
+  box-shadow: 0 6px 25px rgba(0, 0, 0, 0.1);
+  margin-bottom: 3rem;
 }
 
 .work-stats h2 {
-  margin: 0 0 1.5rem 0;
+  margin: 0 0 2rem 0;
   color: #2c3e50;
-  font-size: 1.5rem;
+  font-size: 2rem;
 }
 
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 1.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 2rem;
 }
 
 .stat-card {
   display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: 1.5rem;
   background: rgba(255, 255, 255, 0.8);
-  padding: 1.5rem;
-  border-radius: 12px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+  padding: 2rem;
+  border-radius: 16px;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
   transition: transform 0.3s ease;
 }
 
 .stat-card:hover {
-  transform: translateY(-2px);
+  transform: translateY(-3px);
 }
 
 .stat-icon {
-  font-size: 2rem;
+  font-size: 3rem;
   flex-shrink: 0;
 }
 
@@ -977,54 +1035,55 @@ const isCheckOutTimeDifferent = (record: AttendanceRecord) => {
 }
 
 .stat-number {
-  font-size: 1.5rem;
+  font-size: 2rem;
   font-weight: 700;
   color: #2c3e50;
   line-height: 1;
 }
 
 .stat-label {
-  font-size: 0.9rem;
+  font-size: 1.1rem;
   color: #7f8c8d;
-  margin-top: 0.25rem;
+  margin-top: 0.5rem;
 }
 
 .stat-excluded {
-  font-size: 0.75rem;
+  font-size: 0.9rem;
   color: #e74c3c;
-  margin-top: 0.25rem;
+  margin-top: 0.5rem;
   font-style: italic;
   opacity: 0.8;
 }
 
 .stat-tip {
-  font-size: 0.75rem;
+  font-size: 0.9rem;
   color: #e74c3c;
-  margin-top: 0.25rem;
+  margin-top: 0.5rem;
   font-style: italic;
   opacity: 0.8;
 }
 
 .work-records {
   background: rgba(255, 255, 255, 0.9);
-  padding: 2rem;
-  border-radius: 16px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+  padding: 3rem;
+  border-radius: 20px;
+  box-shadow: 0 6px 25px rgba(0, 0, 0, 0.1);
 }
 
 .work-records h2 {
-  margin: 0 0 1.5rem 0;
+  margin: 0 0 2rem 0;
   color: #2c3e50;
-  font-size: 1.5rem;
+  font-size: 2rem;
 }
 
 .no-records {
   text-align: center;
   color: #7f8c8d;
   font-style: italic;
-  padding: 3rem;
+  padding: 4rem;
   background: rgba(255, 255, 255, 0.5);
-  border-radius: 8px;
+  border-radius: 12px;
+  font-size: 1.3rem;
 }
 
 .records-table {
@@ -1035,7 +1094,7 @@ const isCheckOutTimeDifferent = (record: AttendanceRecord) => {
 }
 
 .records-table table {
-  min-width: 1200px;
+  min-width: 1400px;
   width: 100%;
   border-collapse: separate;
   border-spacing: 0;
@@ -1043,9 +1102,9 @@ const isCheckOutTimeDifferent = (record: AttendanceRecord) => {
 
 .records-table th, .records-table td {
   white-space: nowrap;
-  padding: 0.5rem 1rem;
+  padding: 1rem 1.5rem;
   text-align: left;
-  font-size: 0.95rem;
+  font-size: 1.1rem;
   color: #2c3e50;
   background: #fff;
 }
@@ -1053,6 +1112,7 @@ const isCheckOutTimeDifferent = (record: AttendanceRecord) => {
 .records-table th {
   background: #f8f9fa;
   font-weight: 600;
+  font-size: 1.2rem;
 }
 
 .records-table tr {
@@ -1064,8 +1124,8 @@ const isCheckOutTimeDifferent = (record: AttendanceRecord) => {
 }
 
 .cell {
-  padding: 0.5rem;
-  font-size: 0.9rem;
+  padding: 1rem;
+  font-size: 1.1rem;
 }
 
 .date-cell {
@@ -1083,9 +1143,9 @@ const isCheckOutTimeDifferent = (record: AttendanceRecord) => {
 }
 
 .holiday-badge {
-  padding: 0.25rem 1.0rem;
-  border-radius: 12px;
-  font-size: 0.75rem;
+  padding: 0.5rem 1.5rem;
+  border-radius: 16px;
+  font-size: 0.9rem;
   font-weight: 600;
   color: white;
   background: #e74c3c;
@@ -1096,6 +1156,7 @@ const isCheckOutTimeDifferent = (record: AttendanceRecord) => {
 .expected-checkout {
   color: #7f8c8d;
   font-family: monospace;
+  font-size: 1.1rem;
 }
 
 .break-time-cell,
@@ -1106,35 +1167,38 @@ const isCheckOutTimeDifferent = (record: AttendanceRecord) => {
   font-weight: 500;
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: 0.5rem;
+  font-size: 1.1rem;
 }
 
 .time-display {
-  font-size: 0.9rem;
+  font-size: 1.1rem;
 }
 
 .time-difference {
   color: #e74c3c;
   font-weight: 600;
-  padding: 0.1rem 0.3rem;
-  border-radius: 4px;
+  padding: 0.2rem 0.5rem;
+  border-radius: 6px;
   white-space: nowrap;
+  font-size: 1rem;
 }
 
 .hours-cell {
   color: #2c3e50;
   font-weight: 600;
+  font-size: 1.1rem;
 }
 
 .status-badge {
-  padding: 0.5rem 1rem;
-  border-radius: 25px;
+  padding: 0.8rem 1.5rem;
+  border-radius: 30px;
   color: white;
-  font-size: 0.8rem;
+  font-size: 1rem;
   font-weight: 600;
   text-align: center;
   white-space: nowrap;
-  min-width: 60px;
+  min-width: 80px;
   display: inline-block;
 }
 
@@ -1143,9 +1207,9 @@ const isCheckOutTimeDifferent = (record: AttendanceRecord) => {
 }
 
 .work-type-badge {
-  padding: 0.25rem 1rem;
-  border-radius: 12px;
-  font-size: 0.75rem;
+  padding: 0.5rem 1.5rem;
+  border-radius: 16px;
+  font-size: 0.9rem;
   font-weight: 600;
   color: white;
   background: #3498db;
@@ -1153,33 +1217,33 @@ const isCheckOutTimeDifferent = (record: AttendanceRecord) => {
 }
 
 .shift-stats {
-  margin-top: 2rem;
-  padding-top: 2rem;
-  border-top: 2px solid #ecf0f1;
+  margin-top: 3rem;
+  padding-top: 3rem;
+  border-top: 3px solid #ecf0f1;
 }
 
 .shift-stats h3 {
-  margin: 0 0 1.5rem 0;
+  margin: 0 0 2rem 0;
   color: #2c3e50;
-  font-size: 1.3rem;
+  font-size: 1.8rem;
   font-weight: 600;
 }
 
 .shift-card {
   background: linear-gradient(135deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.7));
-  border: 2px solid #ecf0f1;
+  border: 3px solid #ecf0f1;
 }
 
 .shift-card:hover {
   border-color: #3498db;
-  transform: translateY(-3px);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
+  transform: translateY(-4px);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
 }
 
 .stat-subtitle {
-  font-size: 0.7rem;
+  font-size: 0.9rem;
   color: #95a5a6;
-  margin-top: 0.1rem;
+  margin-top: 0.3rem;
   font-weight: 500;
 }
 
@@ -1191,44 +1255,45 @@ const isCheckOutTimeDifferent = (record: AttendanceRecord) => {
   font-weight: 600;
   color: #2c3e50;
   font-family: monospace;
-  font-size: 0.85rem;
+  font-size: 1rem;
 }
 
 .salary-section {
-  margin-top: 2rem;
-  padding-top: 2rem;
-  border-top: 2px solid #ecf0f1;
+  margin-top: 3rem;
+  padding-top: 3rem;
+  border-top: 3px solid #ecf0f1;
 }
 
 .salary-section h3 {
-  margin: 0 0 1.5rem 0;
+  margin: 0 0 2rem 0;
   color: #2c3e50;
-  font-size: 1.3rem;
+  font-size: 1.8rem;
   font-weight: 600;
 }
 
 .hourly-rates {
   display: flex;
-  gap: 1rem;
+  gap: 2rem;
   flex-wrap: wrap;
 }
 
 .rate-input {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 1rem;
 }
 
 .rate-input label {
   font-weight: 600;
   color: #2c3e50;
+  font-size: 1.2rem;
 }
 
 .rate-input-field {
-  padding: 0.75rem;
-  border: 2px solid #e0e0e0;
-  border-radius: 8px;
-  font-size: 1rem;
+  padding: 1rem;
+  border: 3px solid #e0e0e0;
+  border-radius: 12px;
+  font-size: 1.2rem;
   background: white;
   transition: border-color 0.3s ease;
 }
@@ -1239,46 +1304,46 @@ const isCheckOutTimeDifferent = (record: AttendanceRecord) => {
 }
 
 .currency {
-  font-size: 0.8rem;
+  font-size: 1rem;
   color: #7f8c8d;
   font-weight: 500;
 }
 
 .rate-display-section {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 1rem;
-  margin-top: 1rem;
-  padding: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 2rem;
+  margin-top: 2rem;
+  padding: 2rem;
   background: rgba(255, 255, 255, 0.5);
-  border-radius: 8px;
-  border: 1px solid #ecf0f1;
+  border-radius: 12px;
+  border: 2px solid #ecf0f1;
 }
 
 .rate-display-item {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
-  padding: 0.75rem;
+  gap: 0.5rem;
+  padding: 1.5rem;
   background: rgba(255, 255, 255, 0.8);
-  border-radius: 6px;
-  border: 1px solid #ecf0f1;
+  border-radius: 10px;
+  border: 2px solid #ecf0f1;
 }
 
 .rate-label {
-  font-size: 0.9rem;
+  font-size: 1.1rem;
   font-weight: 600;
   color: #2c3e50;
 }
 
 .rate-value {
-  font-size: 1.1rem;
+  font-size: 1.4rem;
   font-weight: 700;
   color: #2c3e50;
 }
 
 .rate-note {
-  font-size: 0.75rem;
+  font-size: 0.9rem;
   color: #7f8c8d;
   font-style: italic;
 }
@@ -1298,31 +1363,31 @@ const isCheckOutTimeDifferent = (record: AttendanceRecord) => {
 
 .salary-calculation {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 1.5rem;
-  margin-top: 1.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 2rem;
+  margin-top: 2rem;
 }
 
 .salary-card {
   display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: 1.5rem;
   background: linear-gradient(135deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.7));
-  padding: 1.5rem;
-  border-radius: 12px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+  padding: 2rem;
+  border-radius: 16px;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
   transition: transform 0.3s ease;
-  border: 2px solid #ecf0f1;
+  border: 3px solid #ecf0f1;
 }
 
 .salary-card:hover {
-  transform: translateY(-2px);
+  transform: translateY(-3px);
   border-color: #3498db;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
 }
 
 .salary-icon {
-  font-size: 2rem;
+  font-size: 3rem;
   flex-shrink: 0;
 }
 
@@ -1333,22 +1398,22 @@ const isCheckOutTimeDifferent = (record: AttendanceRecord) => {
 }
 
 .salary-number {
-  font-size: 1.5rem;
+  font-size: 2rem;
   font-weight: 700;
   color: #2c3e50;
   line-height: 1;
 }
 
 .salary-label {
-  font-size: 0.9rem;
+  font-size: 1.1rem;
   color: #7f8c8d;
-  margin-top: 0.25rem;
+  margin-top: 0.5rem;
 }
 
 .salary-detail {
-  font-size: 0.75rem;
+  font-size: 0.9rem;
   color: #95a5a6;
-  margin-top: 0.25rem;
+  margin-top: 0.5rem;
 }
 
 .total-salary {
@@ -1375,24 +1440,25 @@ const isCheckOutTimeDifferent = (record: AttendanceRecord) => {
 
 @media (max-width: 768px) {
   .employees-info-page {
-    padding: 1rem;
+    padding: 2rem;
+    font-size: 1.2rem;
   }
 
   .page-header {
     flex-direction: column;
-    gap: 1rem;
+    gap: 2rem;
     text-align: center;
-    padding: 1.5rem;
+    padding: 2rem;
   }
 
   .page-header h1 {
-    font-size: 1.5rem;
+    font-size: 2rem;
   }
 
   .control-section {
     flex-direction: column;
-    gap: 1rem;
-    padding: 1.5rem;
+    gap: 2rem;
+    padding: 2rem;
   }
 
   .employee-selector {
@@ -1410,7 +1476,7 @@ const isCheckOutTimeDifferent = (record: AttendanceRecord) => {
   .table-header,
   .record-row {
     grid-template-columns: 1fr;
-    gap: 0.5rem;
+    gap: 1rem;
   }
 
   .header-cell {
@@ -1421,15 +1487,16 @@ const isCheckOutTimeDifferent = (record: AttendanceRecord) => {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 0.5rem 0;
-    border-bottom: 1px solid #e0e0e0;
+    padding: 1rem 0;
+    border-bottom: 2px solid #e0e0e0;
   }
 
   .cell::before {
     content: attr(data-label);
     font-weight: 600;
     color: #2c3e50;
-    margin-right: 1rem;
+    margin-right: 2rem;
+    font-size: 1.2rem;
   }
 }
 
@@ -1439,6 +1506,6 @@ const isCheckOutTimeDifferent = (record: AttendanceRecord) => {
   left: 0;
   z-index: 2;
   background: #f8f9fa;
-  box-shadow: 2px 0 4px -2px #eee;
+  box-shadow: 3px 0 6px -3px #eee;
 }
 </style> 

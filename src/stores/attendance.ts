@@ -9,6 +9,7 @@ export interface Employee {
   employeeNumber: string
   isActive: boolean,
   salary_type: 'hourly' | 'monthly'
+  pay_period_end_type: 'string'
 }
 
 export interface AttendanceRecord {
