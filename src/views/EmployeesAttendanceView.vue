@@ -17,8 +17,9 @@ const getDefaultStartDate = () => {
   const currentYear = today.getFullYear()
   const currentDay = today.getDate()
   
-  // 기본값으로 20일 종료 사용 (직원 선택 전)
-  const payPeriodEndType = Number(selectedEmployee.value.pay_period_end_type)
+  // 선택된 직원의 급여 기간 종료일 확인 (안전하게 처리)
+  const payPeriodEndType = selectedEmployee.value?.pay_period_end_type ? Number(selectedEmployee.value.pay_period_end_type) : 20
+  
   let startDate: Date
   
   if (payPeriodEndType === 10) {
@@ -56,8 +57,8 @@ const getDefaultEndDate = () => {
   const currentYear = today.getFullYear()
   const currentDay = today.getDate()
   
-  // 기본값으로 20일 종료 사용 (직원 선택 전)
-  const payPeriodEndType = Number(selectedEmployee.value.pay_period_end_type)
+  // 선택된 직원의 급여 기간 종료일 확인 (안전하게 처리)
+  const payPeriodEndType = selectedEmployee.value?.pay_period_end_type ? Number(selectedEmployee.value.pay_period_end_type) : 20
   
   let endDate: Date
   
