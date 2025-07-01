@@ -11,6 +11,7 @@ export const useAuthStore = defineStore('auth', () => {
   // 계산된 속성
   const isAuthenticated = computed(() => !!user.value)
   const isAdmin = computed(() => user.value?.role === 'admin')
+  const isStaff = computed(() => user.value?.role === 'staff')
 
   // 현재 세션 확인
   const checkSession = async () => {
@@ -26,7 +27,7 @@ export const useAuthStore = defineStore('auth', () => {
         // 사용자 역할 정보 가져오기
         const { data: userData, error: userError } = await supabase
           .from('users')
-          .select('id, email, role')
+          .select('id, email, role, facility_id')
           .eq('id', session.user.id)
           .single()
 
@@ -65,7 +66,7 @@ export const useAuthStore = defineStore('auth', () => {
         // 사용자 역할 정보 가져오기
         const { data: userData, error: userError } = await supabase
           .from('users')
-          .select('id, email, role')
+          .select('id, email, role, facility_id')
           .eq('id', data.user.id)
           .single()
 
@@ -112,7 +113,7 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   // 회원가입 (관리자용)
-  const signUp = async (email: string, password: string, role: 'admin' | 'user' = 'user') => {
+  const signUp = async (email: string, password: string, role: 'admin' | 'user' | 'staff' = 'user', facility_id?: string) => {
     loading.value = true
     error.value = null
 
@@ -126,11 +127,22 @@ export const useAuthStore = defineStore('auth', () => {
 
       if (data.user) {
         // 사용자 역할 정보 저장
-        const { error: userError } = await supabase.from('users').insert({
+        const userData: {
+          id: string
+          email: string
+          role: 'admin' | 'user' | 'staff'
+          facility_id?: string
+        } = {
           id: data.user.id,
           email: data.user.email!,
           role,
-        })
+        }
+        
+        if (facility_id) {
+          userData.facility_id = facility_id
+        }
+
+        const { error: userError } = await supabase.from('users').insert(userData)
 
         if (userError) throw userError
 
@@ -152,7 +164,7 @@ export const useAuthStore = defineStore('auth', () => {
         // 사용자 역할 정보 가져오기
         const { data: userData, error: userError } = await supabase
           .from('users')
-          .select('id, email, role')
+          .select('id, email, role, facility_id')
           .eq('id', session.user.id)
           .single()
 
@@ -181,6 +193,7 @@ export const useAuthStore = defineStore('auth', () => {
     // 계산된 속성
     isAuthenticated,
     isAdmin,
+    isStaff,
 
     // 메서드
     checkSession,

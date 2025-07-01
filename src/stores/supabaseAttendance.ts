@@ -1,22 +1,40 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { supabase, type Employee, type AttendanceRecord } from '@/lib/supabase'
+import { supabase, type Employee, type AttendanceRecord, type Facility } from '@/lib/supabase'
+import { useAuthStore } from './auth'
 
 export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () => {
   // 상태
   const employees = ref<Employee[]>([])
   const attendanceRecords = ref<AttendanceRecord[]>([])
+  const facilities = ref<Facility[]>([])
   const loading = ref(false)
   const error = ref<string | null>(null)
+
+  // auth store 가져오기
+  const authStore = useAuthStore()
 
   // 현재 날짜
   const currentDate = computed(() => {
     return new Date().toISOString().split('T')[0]
   })
 
-  // 활성 직원들
+  // 활성 직원들 (role과 facility_id에 따라 필터링)
   const activeEmployees = computed(() => {
-    return employees.value.filter((emp) => emp.is_active && emp.department === 'そうせい岩出')
+    const filteredEmployees = employees.value.filter((emp) => emp.is_active)
+    
+    // admin이면 모든 직원 반환 (facility_id 기준으로 정렬)
+    if (authStore.isAdmin) {
+      return filteredEmployees
+    }
+    
+    // staff이면 facility_id로 필터링 (이미 정렬됨)
+    if (authStore.isStaff && authStore.user?.facility_id) {
+      return filteredEmployees.filter(emp => emp.facility_id === authStore.user?.facility_id)
+    }
+    
+    // 일반 사용자이거나 facility_id가 없는 경우 빈 배열 반환
+    return []
   })
 
   // 오늘의 출퇴근 기록
@@ -45,7 +63,7 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
       const { data, error: supabaseError } = await supabase
         .from('employees')
         .select('*')
-        .order('last_name')
+        .order('employee_code')
 
       if (supabaseError) throw supabaseError
 
@@ -222,17 +240,6 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
         }
       }
       
-      // 휴게시간 제외
-      let breakMinutes = 0
-      if (record.break_time) {
-        const [breakHours, breakMins] = record.break_time.split(':').map(Number)
-        breakMinutes = breakHours * 60 + breakMins
-      }
-      
-      // 순수 근무시간 계산 (휴게시간 제외)
-      const workMinutes = totalMinutes - breakMinutes
-      const totalHours = Math.floor(workMinutes / 60) + Math.round((workMinutes % 60) / 30) * 0.5
-
       // 조퇴 여부 확인 (예상 퇴근시간 기준)
       let status = record.status
       if (record.scheduled_check_out) {
@@ -391,15 +398,39 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
     )
   }
 
+  // facility 이름 가져오기
+  const getFacilityName = (facilityId: string) => {
+    const facility = facilities.value.find(f => f.id === facilityId)
+    return facility?.name || facilityId
+  }
+
+  // facility 목록 로드
+  const loadFacilities = async () => {
+    try {
+      const { data, error: supabaseError } = await supabase
+        .from('facilities')
+        .select('*')
+        .order('id')
+
+      if (supabaseError) throw supabaseError
+
+      facilities.value = data || []
+    } catch (err) {
+      console.error('Error loading facilities:', err)
+      // facility 로딩 실패는 치명적이지 않으므로 에러를 던지지 않음
+    }
+  }
+
   // 초기 데이터 로드
   const initialize = async () => {
-    await Promise.all([loadEmployees(), loadAttendanceRecords()])
+    await Promise.all([loadEmployees(), loadAttendanceRecords(), loadFacilities()])
   }
 
   return {
     // 상태
     employees,
     attendanceRecords,
+    facilities,
     loading,
     error,
     currentDate,
@@ -411,8 +442,10 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
     // 메서드
     getEmployeeRecord,
     getEmployeeById,
+    getFacilityName,
     loadEmployees,
     loadAttendanceRecords,
+    loadFacilities,
     checkIn,
     checkOut,
     addEmployee,

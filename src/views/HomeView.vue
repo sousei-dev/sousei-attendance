@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { useSupabaseAttendanceStore } from '../stores/supabaseAttendance'
 import { computed, ref, onMounted, onUnmounted } from 'vue'
-import type { AttendanceRecord } from '../lib/supabase'
+import type { AttendanceRecord, Employee } from '../lib/supabase'
+import { useAuthStore } from '../stores/auth'
 
 const store = useSupabaseAttendanceStore()
+const authStore = useAuthStore()
 const searchQuery = ref('')
 const currentTime = ref(new Date())
 const formattedTime = ref('')
@@ -51,28 +53,6 @@ onUnmounted(() => {
     clearInterval(timeInterval)
   }
 })
-
-// Supabase 시간 형식(HH:MM:SS)을 일본 시간 형식으로 변환
-const formatTimeForDisplay = (timeString: string | null | undefined) => {
-  if (!timeString) return '-'
-
-  try {
-    // HH:MM:SS 형식을 Date 객체로 변환
-    const [hours, minutes, seconds] = timeString.split(':').map(Number)
-    const date = new Date()
-    date.setHours(hours, minutes, seconds)
-
-    // 일본 시간 형식으로 변환
-    return date.toLocaleTimeString('ja-JP', {
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-    })
-  } catch (error) {
-    console.error('時間形式変換エラー:', error)
-    return timeString
-  }
-}
 
 const todayStats = computed(() => {
   const records = store.todayRecords
@@ -202,19 +182,6 @@ const getStatusText = (status: string, isNightShift?: boolean) => {
   return baseText
 }
 
-const getButtonText = (status: string) => {
-  switch (status) {
-    case 'not-checked':
-      return '出勤'
-    case 'checked-in':
-      return '退勤'
-    case 'checked-out':
-      return '完了'
-    default:
-      return '出勤'
-  }
-}
-
 const getStatusColor = (status: string) => {
   switch (status) {
     case 'not-checked':
@@ -278,6 +245,9 @@ const isButtonDisabled = (employeeId: string) => {
   const status = getEmployeeStatus(employeeId)
   // 이미 퇴근한 경우
   if (status === 'checked-out') {
+    return true
+  }
+  if (status === 'checked-in') {
     return true
   }
   // 출근하지 않은 상태에서 예상 출근/퇴근 시간이 모두 입력되지 않은 경우
@@ -449,68 +419,41 @@ const handleBreakTimeChange = (employeeId: string, event: Event) => {
   setEmployeeExpectedTime(employeeId, 'breakTime', target.value)
 }
 
-// 시간을 30분 단위로 반올림하는 함수
-const roundToNearestHalfHour = (timeStr: string) => {
-  const [hours, minutes] = timeStr.split(':').map(Number)
-  
-  // 30분 단위로 반올림 (0-29분은 0분, 30분은 30분, 31-59분은 30분)
-  let roundedMinutes
-  if (minutes < 30) {
-    // 0-29분은 0분으로
-    roundedMinutes = hours * 60
-  } else {
-    // 30-59분은 30분으로
-    roundedMinutes = hours * 60 + 30
-  }
-  
-  const roundedHours = Math.floor(roundedMinutes / 60)
-  const roundedMins = roundedMinutes % 60
-  
-  return `${roundedHours.toString().padStart(2, '0')}:${roundedMins.toString().padStart(2, '0')}`
-}
-
-// 시간을 분으로 변환 (반올림 적용)
-const getMinutesFromTime = (timeStr: string) => {
-  const roundedTime = roundToNearestHalfHour(timeStr)
-  const [hours, minutes] = roundedTime.split(':').map(Number)
-  return hours * 60 + minutes
-}
-
 // 근무시간 계산 함수 (출퇴근 시간 기반, 휴식시간 제외)
-const calculateWorkHours = (checkInTime: string | null | undefined, checkOutTime: string | null | undefined, breakTime: string | null | undefined) => {
-  if (!checkInTime || !checkOutTime) return 0
+// const calculateWorkHours = (checkInTime: string | null | undefined, checkOutTime: string | null | undefined, breakTime: string | null | undefined) => {
+//   if (!checkInTime || !checkOutTime) return 0
   
-  // 30분 단위로 반올림된 시간으로 계산
-  const checkInMinutes = getMinutesFromTime(checkInTime)
-  const checkOutMinutes = getMinutesFromTime(checkOutTime)
+//   // 30분 단위로 반올림된 시간으로 계산
+//   const checkInMinutes = getMinutesFromTime(checkInTime)
+//   const checkOutMinutes = getMinutesFromTime(checkOutTime)
   
-  // 퇴근시간이 출근시간보다 작으면 다음날로 간주 (야간근무)
-  let workMinutes = checkOutMinutes - checkInMinutes
-  if (workMinutes <= 0) {
-    workMinutes += 24 * 60 // 24시간 추가
-  }
+//   // 퇴근시간이 출근시간보다 작으면 다음날로 간주 (야간근무)
+//   let workMinutes = checkOutMinutes - checkInMinutes
+//   if (workMinutes <= 0) {
+//     workMinutes += 24 * 60 // 24시간 추가
+//   }
   
-  // 휴식시간 계산 (분 단위)
-  const getBreakTimeMinutes = (breakTimeStr: string | null | undefined) => {
-    if (!breakTimeStr) return 0
-    const [hours, minutes] = breakTimeStr.split(':').map(Number)
-    return hours * 60 + minutes
-  }
+//   // 휴식시간 계산 (분 단위)
+//   const getBreakTimeMinutes = (breakTimeStr: string | null | undefined) => {
+//     if (!breakTimeStr) return 0
+//     const [hours, minutes] = breakTimeStr.split(':').map(Number)
+//     return hours * 60 + minutes
+//   }
   
-  const breakTimeMinutes = getBreakTimeMinutes(breakTime)
-  const breakTimeHours = breakTimeMinutes / 60
+//   const breakTimeMinutes = getBreakTimeMinutes(breakTime)
+//   const breakTimeHours = breakTimeMinutes / 60
   
-  // 총 근무시간에서 휴식시간 제외
-  const netWorkHours = (workMinutes / 60) - breakTimeHours
+//   // 총 근무시간에서 휴식시간 제외
+//   const netWorkHours = (workMinutes / 60) - breakTimeHours
   
-  return Math.max(0, netWorkHours) // 음수가 되지 않도록
-}
+//   return Math.max(0, netWorkHours) // 음수가 되지 않도록
+// }
 
 // 모달 상태 관리
 const showEmployeeModal = ref(false)
-const selectedEmployeeForModal = ref<any>(null)
+const selectedEmployeeForModal = ref<Employee | null>(null)
 
-const openEmployeeModal = (employee: any) => {
+const openEmployeeModal = (employee: Employee) => {
   selectedEmployeeForModal.value = employee
   showEmployeeModal.value = true
 }
@@ -519,6 +462,17 @@ const closeEmployeeModal = () => {
   showEmployeeModal.value = false
   selectedEmployeeForModal.value = null
 }
+
+// facility 이름 가져오기
+// const getFacilityName = (facilityId: string) => {
+//   const facilityNames: Record<string, string> = {
+//     'FACILITY_001': '本社',
+//     'FACILITY_002': '支店A',
+//     'FACILITY_003': '支店B',
+//     // 필요에 따라 더 추가
+//   }
+//   return facilityNames[facilityId] || facilityId
+// }
 </script>
 
 <template>
@@ -537,7 +491,12 @@ const closeEmployeeModal = () => {
     <div class="dashboard-header">
       <div class="header-content">
         <div class="header-left">
-          <h1>出退勤システムダッシュボード</h1>
+          <h1>
+            出退勤システムダッシュボード
+            <span v-if="authStore.isStaff && authStore.user?.facility_id" class="facility-name">
+              - {{ store.getFacilityName(authStore.user.facility_id) }}
+            </span>
+          </h1>
           <div class="current-time">
             <div class="time">{{ formattedTime }}</div>
             <div class="date">{{ formattedDate }}</div>
@@ -556,20 +515,6 @@ const closeEmployeeModal = () => {
             <div class="stat-info">
               <div class="stat-number">{{ todayStats.checkedIn }}</div>
               <div class="stat-label">出勤完了</div>
-            </div>
-          </div>
-          <div class="stat-item">
-            <div class="stat-icon">🏢</div>
-            <div class="stat-info">
-              <div class="stat-number">{{ todayStats.present }}</div>
-              <div class="stat-label">現在勤務中</div>
-            </div>
-          </div>
-          <div class="stat-item">
-            <div class="stat-icon">🏠</div>
-            <div class="stat-info">
-              <div class="stat-number">{{ todayStats.checkedOut }}</div>
-              <div class="stat-label">退勤完了</div>
             </div>
           </div>
         </div>
@@ -632,72 +577,72 @@ const closeEmployeeModal = () => {
         <button class="close-btn" @click="closeEmployeeModal" title="닫기">×</button>
         <h3>従業員詳細</h3>
         <div v-if="selectedEmployeeForModal" class="employee-modal-content">
-          <div class="info-section">
-            <div><span class="info-label">従業員番号:</span> <span class="info-value">{{ selectedEmployeeForModal.employee_code }}</span></div>
-            <div><span class="info-label">従業員名:</span> <span class="info-value">{{ selectedEmployeeForModal.last_name }}{{ selectedEmployeeForModal.first_name }}</span></div>
-          </div>
-          <div class="input-section">
-            <div class="input-section-title">予想出退勤入力</div>
-            <div>
-              <span class="info-label">予想出勤時間:</span>
-              <select
-                :value="getEmployeeExpectedTime(selectedEmployeeForModal.id, 'checkIn')"
-                @change="handleExpectedCheckInChange(selectedEmployeeForModal.id, $event)"
-                class="full-width-select"
-                :disabled="getEmployeeStatus(selectedEmployeeForModal.id) !== 'not-checked'"
-              >
-                <option v-for="time in timeOptions" :key="time" :value="time">{{ time }}</option>
-              </select>
-            </div>
-            <div>
-              <span class="info-label">予想退勤時間:</span>
-              <select
-                :value="getEmployeeExpectedTime(selectedEmployeeForModal.id, 'checkOut')"
-                @change="handleExpectedCheckOutChange(selectedEmployeeForModal.id, $event)"
-                class="full-width-select"
-                :disabled="getEmployeeStatus(selectedEmployeeForModal.id) !== 'not-checked'"
-              >
-                <option v-for="time in timeOptions" :key="time" :value="time">{{ time }}</option>
-              </select>
-            </div>
-            <div>
-              <span class="info-label">休憩時間:</span>
-              <select
-                :value="getEmployeeExpectedTime(selectedEmployeeForModal.id, 'breakTime')"
-                @change="handleBreakTimeChange(selectedEmployeeForModal.id, $event)"
-                class="full-width-select"
-                :disabled="getEmployeeStatus(selectedEmployeeForModal.id) !== 'not-checked'"
-              >
-                <option v-for="time in breakTimeOptions" :key="time" :value="time">{{ time }}</option>
-              </select>
+          <div class="employee-header">
+            <div class="employee-basic-info">
+              <span class="employee-code">{{ selectedEmployeeForModal.employee_code }}</span>
+              <span class="employee-name">{{ selectedEmployeeForModal.last_name }}{{ selectedEmployeeForModal.first_name }}</span>
             </div>
           </div>
-          <div class="info-section">
-            <div class="input-section-title">実績</div>
-            <div><span class="info-label">出勤時間:</span> <span class="info-value">{{ formatTimeForDisplay(getEmployeeRecordForDisplay(selectedEmployeeForModal.id)?.check_in) }}</span></div>
-            <div><span class="info-label">退勤時間:</span> <span class="info-value">{{ formatTimeForDisplay(getEmployeeRecordForDisplay(selectedEmployeeForModal.id)?.check_out) }}</span></div>
-            <div><span class="info-label">休憩時間:</span> <span class="info-value">{{ getEmployeeExpectedTime(selectedEmployeeForModal.id, 'breakTime') }}</span></div>
-            <div><span class="info-label">勤務時間:</span>
-              <span class="info-value">
-                {{
-                  getEmployeeRecordForDisplay(selectedEmployeeForModal.id)?.check_in && getEmployeeRecordForDisplay(selectedEmployeeForModal.id)?.check_out
-                    ? `${calculateWorkHours(getEmployeeRecordForDisplay(selectedEmployeeForModal.id)?.check_in, getEmployeeRecordForDisplay(selectedEmployeeForModal.id)?.check_out, getEmployeeRecordForDisplay(selectedEmployeeForModal.id)?.break_time).toFixed(1)}時間`
-                    : '-'
-                }}
-              </span>
+          <div class="modal-main-section">
+            <div class="modal-left-section">
+              <div class="input-section">
+                <div>
+                  <span class="info-label">予想出勤時間:</span>
+                  <select
+                    :value="getEmployeeExpectedTime(selectedEmployeeForModal.id, 'checkIn')"
+                    @change="handleExpectedCheckInChange(selectedEmployeeForModal.id, $event)"
+                    class="full-width-select"
+                    :disabled="getEmployeeStatus(selectedEmployeeForModal.id) !== 'not-checked'"
+                  >
+                    <option v-for="time in timeOptions" :key="time" :value="time">{{ time }}</option>
+                  </select>
+                </div>
+                <div>
+                  <span class="info-label">予想退勤時間:</span>
+                  <select
+                    :value="getEmployeeExpectedTime(selectedEmployeeForModal.id, 'checkOut')"
+                    @change="handleExpectedCheckOutChange(selectedEmployeeForModal.id, $event)"
+                    class="full-width-select"
+                    :disabled="getEmployeeStatus(selectedEmployeeForModal.id) !== 'not-checked'"
+                  >
+                    <option v-for="time in timeOptions" :key="time" :value="time">{{ time }}</option>
+                  </select>
+                </div>
+                <div>
+                  <span class="info-label">休憩時間:</span>
+                  <select
+                    :value="getEmployeeExpectedTime(selectedEmployeeForModal.id, 'breakTime')"
+                    @change="handleBreakTimeChange(selectedEmployeeForModal.id, $event)"
+                    class="full-width-select"
+                    :disabled="getEmployeeStatus(selectedEmployeeForModal.id) !== 'not-checked'"
+                  >
+                    <option v-for="time in breakTimeOptions" :key="time" :value="time">{{ time }}</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div class="modal-right-section">
+              <div class="action-buttons">
+                <button
+                  @click="handleAttendanceAction(selectedEmployeeForModal.id)"
+                  :disabled="isButtonDisabled(selectedEmployeeForModal.id) || store.loading"
+                  class="attendance-btn check-in-btn"
+                  :style="{ backgroundColor: getButtonColorWithExpectedTime(selectedEmployeeForModal.id, getEmployeeStatus(selectedEmployeeForModal.id)) }"
+                >
+                  出勤
+                </button>
+                <button
+                  @click="handleAttendanceAction(selectedEmployeeForModal.id)"
+                  :disabled="getEmployeeStatus(selectedEmployeeForModal.id) !== 'checked-in' || store.loading"
+                  class="attendance-btn check-out-btn"
+                  :style="{ backgroundColor: getEmployeeStatus(selectedEmployeeForModal.id) === 'checked-in' ? '#e74c3c' : '#95a5a6' }"
+                >
+                  退勤
+                </button>
+              </div>
             </div>
           </div>
         </div>
-        <div class="modal-btn-row">
-            <button
-              @click="handleAttendanceAction(selectedEmployeeForModal.id)"
-              :disabled="isButtonDisabled(selectedEmployeeForModal.id) || store.loading"
-              class="attendance-btn"
-              :style="{ backgroundColor: getButtonColorWithExpectedTime(selectedEmployeeForModal.id, getEmployeeStatus(selectedEmployeeForModal.id)) }"
-            >
-              {{ getButtonText(getEmployeeStatus(selectedEmployeeForModal.id)) }}
-            </button>
-          </div>
       </div>
     </div>
   </div>
@@ -797,6 +742,15 @@ const closeEmployeeModal = () => {
   font-size: 2.5rem;
   font-weight: 600;
   white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.facility-name {
+  color: #667eea;
+  font-size: 2rem;
+  font-weight: 500;
 }
 
 .current-time {
@@ -857,7 +811,7 @@ const closeEmployeeModal = () => {
 }
 
 .stat-label {
-  font-size: 1.3rem;
+  font-size: 1.8rem;
   color: #7f8c8d;
   white-space: nowrap;
 }
@@ -884,7 +838,7 @@ const closeEmployeeModal = () => {
 .section-header h2 {
   margin: 0;
   color: #2c3e50;
-  font-size: 2rem;
+  font-size: 1.8rem;
   font-weight: 600;
 }
 
@@ -1009,13 +963,13 @@ const closeEmployeeModal = () => {
   margin-bottom: 1rem;
   font-weight: 600;
   color: #2c3e50;
-  font-size: 1.2rem;
+  font-size: 1.8rem;
 }
 
 .header-cell {
   padding: 1rem;
   text-align: left;
-  font-size: 1.1rem;
+  font-size: 1.8rem;
 }
 
 .employee-rows {
@@ -1028,7 +982,7 @@ const closeEmployeeModal = () => {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr 1fr 1fr;
   gap: 1.5rem;
-  padding: 1.5rem;
+  padding: 0.5rem 1.5rem;
   background: rgba(255, 255, 255, 0.8);
   border-radius: 12px;
   align-items: center;
@@ -1045,7 +999,7 @@ const closeEmployeeModal = () => {
 
 .cell {
   padding: 1rem;
-  font-size: 1.1rem;
+  font-size: 1.8rem;
 }
 
 .employee-code {
@@ -1078,7 +1032,7 @@ const closeEmployeeModal = () => {
   padding: 0.8rem 1.5rem;
   border-radius: 30px;
   color: white;
-  font-size: 1rem;
+  font-size: 1.5rem;
   font-weight: 600;
   text-align: center;
   white-space: nowrap;
@@ -1093,13 +1047,14 @@ const closeEmployeeModal = () => {
   padding: 1rem 2rem;
   border: none;
   border-radius: 12px;
-  font-size: 1.2rem;
+  font-size: 5.0rem;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.3s ease;
   white-space: nowrap;
   min-width: 120px;
   min-height: 55px;
+  height: 100%;
 }
 
 .attendance-btn.check-in {
@@ -1139,7 +1094,7 @@ const closeEmployeeModal = () => {
   padding: 3rem;
   background: rgba(255, 255, 255, 0.8);
   border-radius: 12px;
-  font-size: 1.3rem;
+  font-size: 1.5rem;
 }
 
 .recent-activity {
@@ -1193,11 +1148,11 @@ const closeEmployeeModal = () => {
   font-weight: 600;
   color: #2c3e50;
   white-space: nowrap;
-  font-size: 1.1rem;
+  font-size: 1.8rem;
 }
 
 .employee-dept {
-  font-size: 1rem;
+  font-size: 2rem;
   color: #7f8c8d;
   white-space: nowrap;
 }
@@ -1390,15 +1345,16 @@ const closeEmployeeModal = () => {
   background: #fff;
   border-radius: 20px;
   padding: 3rem 2.5rem 2.5rem 2.5rem;
-  min-width: 400px;
+  min-width: 600px;
   max-width: 95vw;
   box-shadow: 0 10px 40px rgba(52, 152, 219, 0.15), 0 2px 10px rgba(44, 62, 80, 0.08);
   position: relative;
   animation: modalPop 0.25s cubic-bezier(.4,1.6,.6,1) both;
 }
 .employee-modal-content {
-  height: 550px;
-  overflow: scroll;
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
 }
 
 @keyframes modalPop {
@@ -1459,8 +1415,7 @@ const closeEmployeeModal = () => {
 .employee-modal .input-section {
   background: #f4f8fb;
   border-radius: 12px;
-  padding: 1.5rem 1.2rem;
-  margin-bottom: 1.5rem;
+  padding: 0rem 1.2rem;
   box-shadow: 0 2px 6px rgba(52, 152, 219, 0.04);
   display: flex;
   flex-direction: column;
@@ -1468,10 +1423,10 @@ const closeEmployeeModal = () => {
 }
 
 .employee-modal select {
-  padding: 0.8rem 1.2rem;
-  border-radius: 8px;
+  padding: 1rem 1.2rem;
+  border-radius: 10px;
   border: 2px solid #d0d7de;
-  font-size: 1.1rem;
+  font-size: 1.2rem;
   background: #fff;
   transition: border-color 0.2s;
 }
@@ -1490,7 +1445,7 @@ const closeEmployeeModal = () => {
 .employee-modal .attendance-btn {
   padding: 1rem 2.5rem;
   border-radius: 10px;
-  font-size: 1.3rem;
+  font-size: 3.0rem;
   font-weight: 700;
   border: none;
   cursor: pointer;
@@ -1519,6 +1474,150 @@ const closeEmployeeModal = () => {
 .full-width-select {
   width: 100%;
   box-sizing: border-box;
+}
+
+.modal-main-section {
+  display: flex;
+  gap: 3rem;
+  align-items: stretch;
+  flex: 1;
+  min-height: 350px;
+}
+
+.modal-left-section {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-right-section {
+  width: 250px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: stretch;
+}
+
+.action-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  width: 100%;
+  justify-content: center;
+}
+
+.check-in-btn {
+  background: #27ae60 !important;
+  color: white;
+  padding: 2rem 1.5rem;
+  border-radius: 15px;
+  font-size: 1.6rem;
+  font-weight: 700;
+  border: none;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  min-height: 120px;
+  width: 100%;
+  box-shadow: 0 4px 15px rgba(39, 174, 96, 0.3);
+}
+
+.check-in-btn:hover:not(:disabled) {
+  background: #229954 !important;
+  transform: translateY(-5px);
+  box-shadow: 0 8px 25px rgba(39, 174, 96, 0.4);
+}
+
+.check-in-btn:disabled {
+  background: #95a5a6 !important;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.check-out-btn {
+  background: #e74c3c !important;
+  color: white;
+  padding: 2rem 1.5rem;
+  border-radius: 15px;
+  font-size: 1.6rem;
+  font-weight: 700;
+  border: none;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  min-height: 120px;
+  width: 100%;
+  box-shadow: 0 4px 15px rgba(231, 76, 60, 0.3);
+}
+
+.check-out-btn:hover:not(:disabled) {
+  background: #c0392b !important;
+  transform: translateY(-5px);
+  box-shadow: 0 8px 25px rgba(231, 76, 60, 0.4);
+}
+
+.check-out-btn:disabled {
+  background: #95a5a6 !important;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.input-section {
+  background: #f4f8fb;
+  border-radius: 12px;
+  padding: 2rem 1.5rem;
+  margin-bottom: 1.5rem;
+  box-shadow: 0 2px 6px rgba(52, 152, 219, 0.04);
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  flex: 1;
+  justify-content: center;
+}
+
+.input-section-title {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: #2980b9;
+  text-align: left;
+  letter-spacing: 1px;
+  margin-bottom: 1rem;
+}
+
+.employee-modal select {
+  padding: 1rem 1.2rem;
+  border-radius: 10px;
+  border: 2px solid #d0d7de;
+  font-size: 1.2rem;
+  background: #fff;
+  transition: border-color 0.2s;
+}
+
+.employee-header {
+  border-bottom: 2px solid #ecf0f1;
+  padding-bottom: 1.5rem;
+}
+
+.employee-basic-info {
+  display: flex;
+  align-items: center;
+  gap: 2rem;
+}
+
+.employee-code {
+  font-size: 1.4rem;
+  font-weight: 600;
+  color: #2c3e50;
+  background: #f8f9fa;
+  padding: 0.8rem 1.5rem;
+  border-radius: 8px;
+  border: 2px solid #e0e0e0;
+}
+
+.employee-name {
+  font-size: 1.8rem;
+  font-weight: 700;
+  color: #2c3e50;
 }
 </style>
 

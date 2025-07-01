@@ -32,6 +32,7 @@ export interface Employee {
   is_active: boolean
   salary_type: 'hourly' | 'monthly'
   pay_period_end_type: string
+  facility_id?: string
 }
 
 export interface AttendanceRecord {
@@ -53,7 +54,8 @@ export interface AttendanceRecord {
 export interface User {
   id: string
   email: string
-  role: 'admin' | 'user'
+  role: 'admin' | 'user' | 'staff'
+  facility_id?: string
   created_at: string
 }
 
@@ -61,6 +63,16 @@ export interface AuthUser {
   id: string
   email: string
   role: string
+  facility_id?: string
+}
+
+export interface Facility {
+  id: string
+  name: string
+  address?: string
+  phone?: string
+  created_at: string
+  updated_at: string
 }
 
 export interface Database {
@@ -80,6 +92,11 @@ export interface Database {
         Row: User
         Insert: Omit<User, 'id' | 'created_at'>
         Update: Partial<Omit<User, 'id' | 'created_at'>>
+      }
+      facilities: {
+        Row: Facility
+        Insert: Omit<Facility, 'created_at' | 'updated_at'>
+        Update: Partial<Omit<Facility, 'created_at' | 'updated_at'>>
       }
     }
   }

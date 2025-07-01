@@ -37,7 +37,10 @@ onMounted(async () => {
           <RouterLink to="/reports" class="nav-link">勤務レポート</RouterLink> -->
         </nav>
         <div class="user-section">
-          <span class="admin-info">{{ adminUsername }} 管理者</span>
+          <span class="admin-info">
+            {{ adminUsername }} 
+            {{ authStore.isAdmin ? '管理者' : authStore.isStaff ? 'スタッフ' : 'ユーザー' }}
+          </span>
           <button @click="handleLogout" class="logout-btn">ログアウト</button>
         </div>
       </div>
