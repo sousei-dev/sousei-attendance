@@ -33,6 +33,10 @@ const updateFormattedDate = () => {
 }
 
 onMounted(async () => {
+  // 캐시 초기화
+  employeeRecordCache.value = {}
+  employeeExpectedTimes.value = {}
+  
   // Supabase 데이터 초기화
   await store.initialize()
 
@@ -88,17 +92,17 @@ const employeeRecordCache = ref<Record<string, { record: AttendanceRecord | null
 // 직원별 기록을 computed로 관리
 const employeeRecords = computed(() => {
   // store가 아직 초기화되지 않았거나 로딩 중이면 빈 객체 반환
-  if (store.loading || !store.activeEmployees.length) {
+  if (store.loading || !store.activeEmployees.length || !store.attendanceRecords.length) {
     return {}
   }
   
   const records: Record<string, AttendanceRecord | null> = {}
   
   filteredEmployees.value.forEach(employee => {
-    // 캐시된 기록이 있고 최신이면 반환
+    // 캐시된 기록이 있고 최신이면 반환 (캐시 시간 단축)
     const cached = employeeRecordCache.value[employee.id]
     const now = Date.now()
-    if (cached && (now - cached.lastUpdate) < 5000) { // 5초 캐시 
+    if (cached && (now - cached.lastUpdate) < 2000) { // 2초로 단축
       records[employee.id] = cached.record
       return
     }
@@ -152,7 +156,7 @@ const getEmployeeRecordForDisplay = (employeeId: string) => {
 // 직원별 상태를 computed로 관리
 const employeeStatuses = computed(() => {
   // store가 아직 초기화되지 않았거나 로딩 중이면 빈 객체 반환
-  if (store.loading || !store.activeEmployees.length) {
+  if (store.loading || !store.activeEmployees.length || !store.attendanceRecords.length) {
     return {}
   }
   
@@ -257,13 +261,15 @@ const handleAttendanceAction = async (employeeId: string) => {
       await store.checkOut(employeeId)
     }
     
-    // 캐시 무효화하여 최신 데이터 반영
+    // 캐시 완전 무효화
     employeeRecordCache.value = {}
-    // 예상 시간 캐시도 무효화
-    delete employeeExpectedTimes.value[employeeId]
+    employeeExpectedTimes.value = {}
     
     // 데이터 다시 로드
     await store.loadAttendanceRecords()
+    
+    // 강제로 computed 재계산을 위한 지연
+    await new Promise(resolve => setTimeout(resolve, 100))
   } catch (error) {
     console.error('出退勤処理中にエラーが発生しました:', error)
   }
@@ -479,36 +485,6 @@ const handleBreakTimeChange = (employeeId: string, event: Event) => {
   const target = event.target as HTMLSelectElement
   setEmployeeExpectedTime(employeeId, 'breakTime', target.value)
 }
-
-// 근무시간 계산 함수 (출퇴근 시간 기반, 휴식시간 제외)
-// const calculateWorkHours = (checkInTime: string | null | undefined, checkOutTime: string | null | undefined, breakTime: string | null | undefined) => {
-//   if (!checkInTime || !checkOutTime) return 0
-  
-//   // 30분 단위로 반올림된 시간으로 계산
-//   const checkInMinutes = getMinutesFromTime(checkInTime)
-//   const checkOutMinutes = getMinutesFromTime(checkOutTime)
-  
-//   // 퇴근시간이 출근시간보다 작으면 다음날로 간주 (야간근무)
-//   let workMinutes = checkOutMinutes - checkInMinutes
-//   if (workMinutes <= 0) {
-//     workMinutes += 24 * 60 // 24시간 추가
-//   }
-  
-//   // 휴식시간 계산 (분 단위)
-//   const getBreakTimeMinutes = (breakTimeStr: string | null | undefined) => {
-//     if (!breakTimeStr) return 0
-//     const [hours, minutes] = breakTimeStr.split(':').map(Number)
-//     return hours * 60 + minutes
-//   }
-  
-//   const breakTimeMinutes = getBreakTimeMinutes(breakTime)
-//   const breakTimeHours = breakTimeMinutes / 60
-  
-//   // 총 근무시간에서 휴식시간 제외
-//   const netWorkHours = (workMinutes / 60) - breakTimeHours
-  
-//   return Math.max(0, netWorkHours) // 음수가 되지 않도록
-// }
 
 // 모달 상태 관리
 const showEmployeeModal = ref(false)
