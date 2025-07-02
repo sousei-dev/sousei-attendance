@@ -83,7 +83,7 @@ const filteredEmployees = computed(() => {
 })
 
 // 직원별 기록 캐시 (야간 근무 고려)
-const employeeRecordCache = ref<Record<string, { record: AttendanceRecord | undefined; lastUpdate: number }>>({})
+const employeeRecordCache = ref<Record<string, { record: AttendanceRecord | null; lastUpdate: number }>>({})
 
 // 직원별 기록을 computed로 관리
 const employeeRecords = computed(() => {
@@ -92,18 +92,18 @@ const employeeRecords = computed(() => {
     return {}
   }
   
-  const records: Record<string, AttendanceRecord | undefined> = {}
+  const records: Record<string, AttendanceRecord | null> = {}
   
   filteredEmployees.value.forEach(employee => {
     // 캐시된 기록이 있고 최신이면 반환
     const cached = employeeRecordCache.value[employee.id]
     const now = Date.now()
-    if (cached && (now - cached.lastUpdate) < 5000) { // 5초 캐시
+    if (cached && (now - cached.lastUpdate) < 5000) { // 5초 캐시 
       records[employee.id] = cached.record
       return
     }
 
-    let record: AttendanceRecord | undefined = undefined
+    let record: AttendanceRecord | null = null
     
     // 먼저 오늘 기록 확인
     record = store.getEmployeeRecord(employee.id, store.currentDate)
@@ -329,7 +329,7 @@ const timeToMinutes = (timeString: string) => {
 // 직원의 예상 시간 가져오기
 const getEmployeeExpectedTime = (employeeId: string, type: 'checkIn' | 'checkOut' | 'breakTime') => {
   if (!employeeExpectedTimes.value[employeeId]) {
-    let record: AttendanceRecord | undefined = undefined
+    let record: AttendanceRecord | null = null
     
     // 먼저 오늘 기록 확인
     record = store.getEmployeeRecord(employeeId, store.currentDate)
@@ -366,13 +366,13 @@ const getEmployeeExpectedTime = (employeeId: string, type: 'checkIn' | 'checkOut
       breakTime: breakTime
     }
   }
-  return employeeExpectedTimes.value[employeeId][type]
+  return employeeExpectedTimes.value[employeeId][type]  
 }
 
 // 직원의 예상 시간 설정
 const setEmployeeExpectedTime = (employeeId: string, type: 'checkIn' | 'checkOut' | 'breakTime', time: string) => {
   if (!employeeExpectedTimes.value[employeeId]) {
-    let record: AttendanceRecord | undefined = undefined
+    let record: AttendanceRecord | null = null
     
     // 먼저 오늘 기록 확인
     record = store.getEmployeeRecord(employeeId, store.currentDate)
