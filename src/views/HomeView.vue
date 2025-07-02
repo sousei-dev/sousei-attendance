@@ -103,15 +103,33 @@ const employeeRecords = computed(() => {
       return
     }
 
-    // 오늘 기록 확인
-    let record = store.getEmployeeRecord(employee.id, store.currentDate)
+    let record: AttendanceRecord | undefined = undefined
     
-    // 오늘 기록이 없으면 어제 기록 확인 (야간 근무의 경우)
+    // 먼저 오늘 기록 확인
+    record = store.getEmployeeRecord(employee.id, store.currentDate)
+    
+    // 오늘 기록이 없으면 전날 야간 근무 기록 확인
     if (!record) {
       const yesterday = new Date()
       yesterday.setDate(yesterday.getDate() - 1)
       const yesterdayDate = yesterday.toISOString().split('T')[0]
-      record = store.getEmployeeRecord(employee.id, yesterdayDate)
+      const yesterdayRecord = store.getEmployeeRecord(employee.id, yesterdayDate)
+      if (yesterdayRecord && yesterdayRecord.is_night_shift) {
+        record = yesterdayRecord
+        console.log(`야간 근무자 발견 (전날): ${employee.employee_code}, ${yesterdayDate}`, record)
+      }
+    }
+    
+    // 여전히 기록이 없으면 다음날 야간 근무 기록 확인
+    if (!record) {
+      const tomorrow = new Date()
+      tomorrow.setDate(tomorrow.getDate() + 1)
+      const tomorrowDate = tomorrow.toISOString().split('T')[0]
+      const tomorrowRecord = store.getEmployeeRecord(employee.id, tomorrowDate)
+      if (tomorrowRecord && tomorrowRecord.is_night_shift) {
+        record = tomorrowRecord
+        console.log(`야간 근무자 발견 (다음날): ${employee.employee_code}, ${tomorrowDate}`, record)
+      }
     }
     
     // 캐시 업데이트
@@ -134,7 +152,7 @@ const getEmployeeRecordForDisplay = (employeeId: string) => {
 // 직원별 상태를 computed로 관리
 const employeeStatuses = computed(() => {
   // store가 아직 초기화되지 않았거나 로딩 중이면 빈 객체 반환
-  if (store.loading || !store.activeEmployees.length || !store.todayRecords.length) {
+  if (store.loading || !store.activeEmployees.length) {
     return {}
   }
   
@@ -150,6 +168,16 @@ const employeeStatuses = computed(() => {
       statuses[employee.id] = 'checked-in'
     } else {
       statuses[employee.id] = 'not-checked'
+    }
+    
+    // 야간 근무자 디버깅 로그
+    if (record && record.is_night_shift) {
+      console.log(`야간 근무자 상태: ${employee.employee_code}`, {
+        check_in: record.check_in,
+        check_out: record.check_out,
+        status: statuses[employee.id],
+        is_night_shift: record.is_night_shift
+      })
     }
   })
   
@@ -175,8 +203,12 @@ const getStatusText = (status: string, isNightShift?: boolean) => {
   })()
   
   // 야간 근무 표시 추가
-  if (isNightShift && status === 'checked-in') {
-    return `${baseText} (夜勤)`
+  if (isNightShift) {
+    if (status === 'checked-in') {
+      return '勤務中(夜勤)'
+    } else if (status === 'checked-out') {
+      return '退勤中'
+    }
   }
   
   return baseText
@@ -220,10 +252,7 @@ const handleAttendanceAction = async (employeeId: string) => {
 
   try {
     if (status === 'not-checked') {
-      const expectedCheckIn = getEmployeeExpectedTime(employeeId, 'checkIn')
-      const expectedCheckOut = getEmployeeExpectedTime(employeeId, 'checkOut')
-      const breakTime = getEmployeeExpectedTime(employeeId, 'breakTime')
-      await store.checkIn(employeeId, expectedCheckIn, expectedCheckOut, breakTime)
+      await store.checkIn(employeeId)
     } else if (status === 'checked-in') {
       await store.checkOut(employeeId)
     }
@@ -300,15 +329,31 @@ const timeToMinutes = (timeString: string) => {
 // 직원의 예상 시간 가져오기
 const getEmployeeExpectedTime = (employeeId: string, type: 'checkIn' | 'checkOut' | 'breakTime') => {
   if (!employeeExpectedTimes.value[employeeId]) {
-    // 먼저 현재 날짜의 AttendanceRecord에서 scheduled 시간 확인
-    let record = store.getEmployeeRecord(employeeId, store.currentDate)
+    let record: AttendanceRecord | undefined = undefined
     
-    // 현재 날짜에 기록이 없으면 어제 기록 확인 (야간 근무의 경우)
+    // 먼저 오늘 기록 확인
+    record = store.getEmployeeRecord(employeeId, store.currentDate)
+    
+    // 오늘 기록이 없으면 전날 야간 근무 기록 확인
     if (!record) {
       const yesterday = new Date()
       yesterday.setDate(yesterday.getDate() - 1)
       const yesterdayDate = yesterday.toISOString().split('T')[0]
-      record = store.getEmployeeRecord(employeeId, yesterdayDate)
+      const yesterdayRecord = store.getEmployeeRecord(employeeId, yesterdayDate)
+      if (yesterdayRecord && yesterdayRecord.is_night_shift) {
+        record = yesterdayRecord
+      }
+    }
+    
+    // 여전히 기록이 없으면 다음날 야간 근무 기록 확인
+    if (!record) {
+      const tomorrow = new Date()
+      tomorrow.setDate(tomorrow.getDate() + 1)
+      const tomorrowDate = tomorrow.toISOString().split('T')[0]
+      const tomorrowRecord = store.getEmployeeRecord(employeeId, tomorrowDate)
+      if (tomorrowRecord && tomorrowRecord.is_night_shift) {
+        record = tomorrowRecord
+      }
     }
     
     const scheduledCheckIn = formatTimeForSelect(record?.scheduled_check_in)
@@ -327,15 +372,31 @@ const getEmployeeExpectedTime = (employeeId: string, type: 'checkIn' | 'checkOut
 // 직원의 예상 시간 설정
 const setEmployeeExpectedTime = (employeeId: string, type: 'checkIn' | 'checkOut' | 'breakTime', time: string) => {
   if (!employeeExpectedTimes.value[employeeId]) {
-    // 먼저 현재 날짜의 AttendanceRecord에서 scheduled 시간 확인
-    let record = store.getEmployeeRecord(employeeId, store.currentDate)
+    let record: AttendanceRecord | undefined = undefined
     
-    // 현재 날짜에 기록이 없으면 어제 기록 확인 (야간 근무의 경우)
+    // 먼저 오늘 기록 확인
+    record = store.getEmployeeRecord(employeeId, store.currentDate)
+    
+    // 오늘 기록이 없으면 전날 야간 근무 기록 확인
     if (!record) {
       const yesterday = new Date()
       yesterday.setDate(yesterday.getDate() - 1)
       const yesterdayDate = yesterday.toISOString().split('T')[0]
-      record = store.getEmployeeRecord(employeeId, yesterdayDate)
+      const yesterdayRecord = store.getEmployeeRecord(employeeId, yesterdayDate)
+      if (yesterdayRecord && yesterdayRecord.is_night_shift) {
+        record = yesterdayRecord
+      }
+    }
+    
+    // 여전히 기록이 없으면 다음날 야간 근무 기록 확인
+    if (!record) {
+      const tomorrow = new Date()
+      tomorrow.setDate(tomorrow.getDate() + 1)
+      const tomorrowDate = tomorrow.toISOString().split('T')[0]
+      const tomorrowRecord = store.getEmployeeRecord(employeeId, tomorrowDate)
+      if (tomorrowRecord && tomorrowRecord.is_night_shift) {
+        record = tomorrowRecord
+      }
     }
     
     const scheduledCheckIn = formatTimeForSelect(record?.scheduled_check_in)
