@@ -339,7 +339,7 @@ const timeOptions = generateTimeOptions()
 const employeeExpectedTimes = ref<Record<string, { checkIn: string; checkOut: string; breakTime: string }>>({})
 
 // 시간 형식 변환 (HH:MM:SS → HH:MM)
-const formatTimeForSelect = (timeString: string | null | undefined) => {
+const formatTimeForSelect = (timeString: string | undefined) => {
   if (!timeString) return '00:00'
   
   // HH:MM:SS 형식을 HH:MM으로 변환
