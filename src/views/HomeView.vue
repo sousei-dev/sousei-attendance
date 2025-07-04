@@ -339,7 +339,7 @@ const timeOptions = generateTimeOptions()
 const employeeExpectedTimes = ref<Record<string, { checkIn: string; checkOut: string; breakTime: string }>>({})
 
 // 시간 형식 변환 (HH:MM:SS → HH:MM)
-const formatTimeForSelect = (timeString: string | undefined) => {
+const formatTimeForSelect = (timeString: string | null | undefined) => {
   if (!timeString) return '00:00'
   
   // HH:MM:SS 형식을 HH:MM으로 변환
@@ -387,9 +387,9 @@ const getEmployeeExpectedTime = (employeeId: string, type: 'checkIn' | 'checkOut
       }
     }
     
-    const scheduledCheckIn = formatTimeForSelect(record?.scheduled_check_in)
-    const scheduledCheckOut = formatTimeForSelect(record?.scheduled_check_out)
-    const breakTime = formatTimeForSelect(record?.break_time)
+    const scheduledCheckIn = formatTimeForSelect(record?.scheduled_check_in ?? undefined)
+    const scheduledCheckOut = formatTimeForSelect(record?.scheduled_check_out ?? undefined)
+    const breakTime = formatTimeForSelect(record?.break_time ?? undefined)
     
     employeeExpectedTimes.value[employeeId] = { 
       checkIn: scheduledCheckIn, 
@@ -430,9 +430,9 @@ const setEmployeeExpectedTime = (employeeId: string, type: 'checkIn' | 'checkOut
       }
     }
     
-    const scheduledCheckIn = formatTimeForSelect(record?.scheduled_check_in)
-    const scheduledCheckOut = formatTimeForSelect(record?.scheduled_check_out)
-    const breakTime = formatTimeForSelect(record?.break_time)
+    const scheduledCheckIn = formatTimeForSelect(record?.scheduled_check_in ?? undefined)
+    const scheduledCheckOut = formatTimeForSelect(record?.scheduled_check_out ?? undefined)
+    const breakTime = formatTimeForSelect(record?.break_time ?? undefined)
     
     employeeExpectedTimes.value[employeeId] = { 
       checkIn: scheduledCheckIn, 
