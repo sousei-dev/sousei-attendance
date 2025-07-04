@@ -51,11 +51,45 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
       targetDate = yesterday.toISOString().split('T')[0]
     }
     
-    // 18시 이후: 다음날 야간 근무 기록
+    // 18시 이후: 다음날 야간 근무 기록 + 오늘 일반 근무 기록
     if (currentHour >= 18) {
       const tomorrow = new Date(now)
       tomorrow.setDate(tomorrow.getDate() + 1)
-      targetDate = tomorrow.toISOString().split('T')[0]
+      const tomorrowDate = tomorrow.toISOString().split('T')[0]
+      
+      // 오늘 일반 근무 기록 (퇴근한 사람들 포함)
+      const todayRecords = attendanceRecords.value.filter((record) => 
+        record.date === currentDate.value && 
+        !record.is_night_shift
+      )
+      
+      // 다음날 야간 근무 기록
+      const tomorrowNightRecords = attendanceRecords.value.filter((record) => 
+        record.date === tomorrowDate && 
+        record.is_night_shift
+      )
+      
+      return [...todayRecords, ...tomorrowNightRecords]
+    }
+    
+    // 6시~18시 사이: 오늘 기록 + 전날 야간 근무 기록 (아직 퇴근하지 않은 사람들)
+    if (currentHour >= 6 && currentHour < 18) {
+      const yesterday = new Date(now)
+      yesterday.setDate(yesterday.getDate() - 1)
+      const yesterdayDate = yesterday.toISOString().split('T')[0]
+      
+      // 오늘 기록
+      const todayRecords = attendanceRecords.value.filter((record) => record.date === targetDate)
+      
+      // 전날 야간 근무 기록 (아직 퇴근하지 않은 사람들만)
+      const yesterdayNightRecords = attendanceRecords.value.filter((record) => 
+        record.date === yesterdayDate && 
+        record.is_night_shift && 
+        record.check_in && 
+        !record.check_out
+      )
+      
+      return [...todayRecords, ...yesterdayNightRecords]
     }
     
     // 해당 날짜의 기록만 반환
@@ -131,7 +165,12 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
   }
 
   // 출근 처리
-  const checkIn = async (employeeId: string) => {
+  const checkIn = async (
+    employeeId: string, 
+    scheduledCheckIn?: string, 
+    scheduledCheckOut?: string, 
+    breakTime?: string
+  ) => {
     loading.value = true
     error.value = null
 
@@ -195,8 +234,9 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
         throw new Error('既に出勤処理されています。')
       }
 
-      // 야간 근무 여부 확인 (18시 이후 출근 또는 06시 이전 출근)
-      const isNightShift = currentHour >= 18 || currentHour < 6
+      // 야간 근무 여부 확인 (16:30 이전은 일반 근무, 18:00 이후는 야간 근무)
+      const currentMinutes = now.getHours() * 60 + now.getMinutes()
+      const isNightShift = currentMinutes >= 18 * 60 || currentMinutes < 6 * 60 // 18:00 이후 또는 06:00 이전
       
       // 야간 근무의 경우 실제 근무 날짜 계산
       let actualWorkDate = currentDate.value
@@ -207,16 +247,13 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
         actualWorkDate = tomorrow.toISOString().split('T')[0]
       }
 
-      // 출근 시간 기준으로 상태 결정 (예상 출근시간 기준)
+      // 출근 시간 기준으로 상태 결정
       let status: 'present' | 'late' = 'present'
-      if (currentHour >= 18) {
-        // 18시 이후 출근은 다음날까지 근무
-        status = 'present'
-      } else if (currentHour < 6) {
-        // 06시 이전 출근은 전날까지 근무
+      if (isNightShift) {
+        // 야간 근무: 항상 정상
         status = 'present'
       } else {
-        // 주간 근무: 9시 이전 정상, 이후 지각
+        // 일반 근무: 9시 이전 정상, 이후 지각
         const isLate = now.getHours() > 9 || (now.getHours() === 9 && now.getMinutes() > 0)
         status = isLate ? 'late' : 'present'
       }
@@ -229,9 +266,9 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
           check_in: checkInTime,
           check_out: null,
           status,
-          scheduled_check_in: null,
-          scheduled_check_out: null,
-          break_time: null, // 휴게시간 추가
+          scheduled_check_in: scheduledCheckIn || null,
+          scheduled_check_out: scheduledCheckOut || null,
+          break_time: breakTime || null, // 휴게시간 추가
           is_night_shift: isNightShift, // 야간 근무 플래그 추가
         })
         .select()

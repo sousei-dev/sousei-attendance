@@ -33,12 +33,18 @@ const updateFormattedDate = () => {
 }
 
 onMounted(async () => {
-  // 캐시 초기화
+  // 캐시 완전 초기화
   employeeRecordCache.value = {}
   employeeExpectedTimes.value = {}
   
   // Supabase 데이터 초기화
   await store.initialize()
+  
+  // 데이터 다시 로드
+  await store.loadAttendanceRecords()
+  
+  // 강제로 computed 재계산을 위한 지연
+  await new Promise(resolve => setTimeout(resolve, 200))
 
   // 초기 포맷팅
   updateFormattedTime()
@@ -102,7 +108,7 @@ const employeeRecords = computed(() => {
     // 캐시된 기록이 있고 최신이면 반환 (캐시 시간 단축)
     const cached = employeeRecordCache.value[employee.id]
     const now = Date.now()
-    if (cached && (now - cached.lastUpdate) < 2000) { // 2초로 단축
+    if (cached && (now - cached.lastUpdate) < 500) { // 500ms로 단축
       records[employee.id] = cached.record
       return
     }
@@ -112,24 +118,27 @@ const employeeRecords = computed(() => {
     // 먼저 오늘 기록 확인
     record = store.getEmployeeRecord(employee.id, store.currentDate)
     
-    // 오늘 기록이 없으면 전날 야간 근무 기록 확인
+    // 오늘 기록이 없으면 전날 기록 확인 (야간 근무자만)
     if (!record) {
       const yesterday = new Date()
       yesterday.setDate(yesterday.getDate() - 1)
       const yesterdayDate = yesterday.toISOString().split('T')[0]
       const yesterdayRecord = store.getEmployeeRecord(employee.id, yesterdayDate)
+      
+      // 야간 근무 판단: is_night_shift 필드 사용
       if (yesterdayRecord && yesterdayRecord.is_night_shift) {
         record = yesterdayRecord
-        console.log(`야간 근무자 발견 (전날): ${employee.employee_code}, ${yesterdayDate}`, record)
       }
     }
     
-    // 여전히 기록이 없으면 다음날 야간 근무 기록 확인
+    // 여전히 기록이 없으면 다음날 기록 확인 (야간 근무자만)
     if (!record) {
       const tomorrow = new Date()
       tomorrow.setDate(tomorrow.getDate() + 1)
       const tomorrowDate = tomorrow.toISOString().split('T')[0]
       const tomorrowRecord = store.getEmployeeRecord(employee.id, tomorrowDate)
+      
+      // 야간 근무 판단: is_night_shift 필드 사용
       if (tomorrowRecord && tomorrowRecord.is_night_shift) {
         record = tomorrowRecord
         console.log(`야간 근무자 발견 (다음날): ${employee.employee_code}, ${tomorrowDate}`, record)
@@ -256,7 +265,23 @@ const handleAttendanceAction = async (employeeId: string) => {
 
   try {
     if (status === 'not-checked') {
-      await store.checkIn(employeeId)
+      // 예상 시간 가져오기
+      const scheduledCheckIn = getEmployeeExpectedTime(employeeId, 'checkIn')
+      const scheduledCheckOut = getEmployeeExpectedTime(employeeId, 'checkOut')
+      const breakTime = getEmployeeExpectedTime(employeeId, 'breakTime')
+      
+      // HH:MM 형식을 HH:MM:SS 형식으로 변환
+      const formatTimeForDB = (time: string) => {
+        if (time === '00:00') return null
+        return `${time}:00`
+      }
+      
+      await store.checkIn(
+        employeeId, 
+        formatTimeForDB(scheduledCheckIn), 
+        formatTimeForDB(scheduledCheckOut), 
+        formatTimeForDB(breakTime)
+      )
     } else if (status === 'checked-in') {
       await store.checkOut(employeeId)
     }
@@ -340,7 +365,7 @@ const getEmployeeExpectedTime = (employeeId: string, type: 'checkIn' | 'checkOut
     // 먼저 오늘 기록 확인
     record = store.getEmployeeRecord(employeeId, store.currentDate)
     
-    // 오늘 기록이 없으면 전날 야간 근무 기록 확인
+    // 오늘 기록이 없으면 전날 야간 근무 기록 확인 (야간 근무자만)
     if (!record) {
       const yesterday = new Date()
       yesterday.setDate(yesterday.getDate() - 1)
@@ -351,7 +376,7 @@ const getEmployeeExpectedTime = (employeeId: string, type: 'checkIn' | 'checkOut
       }
     }
     
-    // 여전히 기록이 없으면 다음날 야간 근무 기록 확인
+    // 여전히 기록이 없으면 다음날 야간 근무 기록 확인 (야간 근무자만)
     if (!record) {
       const tomorrow = new Date()
       tomorrow.setDate(tomorrow.getDate() + 1)
@@ -383,7 +408,7 @@ const setEmployeeExpectedTime = (employeeId: string, type: 'checkIn' | 'checkOut
     // 먼저 오늘 기록 확인
     record = store.getEmployeeRecord(employeeId, store.currentDate)
     
-    // 오늘 기록이 없으면 전날 야간 근무 기록 확인
+    // 오늘 기록이 없으면 전날 야간 근무 기록 확인 (야간 근무자만)
     if (!record) {
       const yesterday = new Date()
       yesterday.setDate(yesterday.getDate() - 1)
@@ -394,7 +419,7 @@ const setEmployeeExpectedTime = (employeeId: string, type: 'checkIn' | 'checkOut
       }
     }
     
-    // 여전히 기록이 없으면 다음날 야간 근무 기록 확인
+    // 여전히 기록이 없으면 다음날 야간 근무 기록 확인 (야간 근무자만)
     if (!record) {
       const tomorrow = new Date()
       tomorrow.setDate(tomorrow.getDate() + 1)
