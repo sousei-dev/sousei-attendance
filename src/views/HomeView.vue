@@ -271,8 +271,8 @@ const handleAttendanceAction = async (employeeId: string) => {
       const breakTime = getEmployeeExpectedTime(employeeId, 'breakTime')
       
       // HH:MM 형식을 HH:MM:SS 형식으로 변환
-      const formatTimeForDB = (time: string) => {
-        if (time === '00:00') return null
+      const formatTimeForDB = (time: string): string | undefined => {
+        if (time === '00:00') return undefined
         return `${time}:00`
       }
       
