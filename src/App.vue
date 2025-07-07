@@ -20,8 +20,13 @@ const handleLogout = async () => {
 
 onMounted(async () => {
   // 인증 상태 확인 및 리스너 설정
-  await authStore.checkSession()
-  authStore.setupAuthListener()
+  try {
+    // 인증 상태 확인
+    await authStore.checkSession()
+    
+  } catch (error) {
+    console.error('App.vue 마운트 중 에러:', error)
+  }
 })
 </script>
 

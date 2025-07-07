@@ -15,7 +15,6 @@ const getDefaultStartDate = () => {
   const today = new Date()
   const currentMonth = today.getMonth()
   const currentYear = today.getFullYear()
-  const currentDay = today.getDate()
   
   // 선택된 직원의 급여 기간 종료일 확인 (안전하게 처리)
   const payPeriodEndType = selectedEmployee.value?.pay_period_end_type ? Number(selectedEmployee.value.pay_period_end_type) : 20
@@ -24,28 +23,13 @@ const getDefaultStartDate = () => {
   
   if (payPeriodEndType === 10) {
     console.log('10일 종료')
-    // 10일 종료: 이전달 11일부터 이번달 10일까지
-    if (currentDay <= 10) {
-      // 현재 1-10일이면 이전달 11일부터
-      const lastMonth = currentMonth === 0 ? 12 : currentMonth - 1
-      const lastYear = currentMonth === 0 ? currentYear - 1 : currentYear
-      startDate = new Date(lastYear, lastMonth - 1, 12)
-    } else {
-      // 현재 11일 이후면 이번달 11일부터
-      startDate = new Date(currentYear, currentMonth - 1, 12)
-    }
+    // 현재 11일 이후면 이번달 11일부터
+    startDate = new Date(currentYear, currentMonth - 1, 12)
   } else {
     console.log('20일 종료')
     // 20일 종료: 이전달 21일부터 이번달 20일까지
-    if (currentDay <= 20) {
-      // 현재 1-20일이면 이전달 21일부터
-      const lastMonth = currentMonth === 0 ? 11 : currentMonth - 1
-      const lastYear = currentMonth === 0 ? currentYear - 1 : currentYear
-      startDate = new Date(lastYear, lastMonth - 1, 22)
-    } else {
-      // 현재 21일 이후면 이번달 21일부터
-      startDate = new Date(currentYear, currentMonth - 1, 22)
-    }
+    // 현재 21일 이후면 이번달 21일부터
+    startDate = new Date(currentYear, currentMonth - 1, 22)
   }
   
   return startDate.toISOString().split('T')[0]
@@ -200,13 +184,95 @@ const getMinutesFromTime = (timeStr: string) => {
   return hours * 60 + minutes
 }
 
-// 근무시간 계산 함수 (출퇴근 시간 기반)
-const calculateWorkHours = (checkInTime: string | null, checkOutTime: string | null) => {
+// 출근시간을 30분 단위로 올림하는 함수
+const roundUpToNearestHalfHour = (timeStr: string) => {
+  const [hours, minutes] = timeStr.split(':').map(Number)
+  
+  // 30분 단위로 올림 (1-30분은 30분, 31-59분은 다음시간 00분)
+  let roundedMinutes
+  if (minutes === 0) {
+    // 정각이면 그대로
+    roundedMinutes = hours * 60
+  } else if (minutes <= 30) {
+    // 1-30분은 30분으로 올림
+    roundedMinutes = hours * 60 + 30
+  } else {
+    // 31-59분은 다음시간 00분으로 올림
+    roundedMinutes = (hours + 1) * 60
+  }
+  
+  const roundedHours = Math.floor(roundedMinutes / 60)
+  const roundedMins = roundedMinutes % 60
+  
+  return `${roundedHours.toString().padStart(2, '0')}:${roundedMins.toString().padStart(2, '0')}`
+}
+
+// 퇴근시간을 30분 단위로 내림하는 함수
+const roundDownToNearestHalfHour = (timeStr: string) => {
+  const [hours, minutes] = timeStr.split(':').map(Number)
+  
+  // 30분 단위로 내림 (1-29분은 00분, 30-59분은 30분)
+  let roundedMinutes
+  if (minutes === 0) {
+    // 정각이면 그대로
+    roundedMinutes = hours * 60
+  } else if (minutes < 30) {
+    // 1-29분은 00분으로 내림
+    roundedMinutes = hours * 60
+  } else {
+    // 30-59분은 30분으로 내림
+    roundedMinutes = hours * 60 + 30
+  }
+  
+  const roundedHours = Math.floor(roundedMinutes / 60)
+  const roundedMins = roundedMinutes % 60
+  
+  return `${roundedHours.toString().padStart(2, '0')}:${roundedMins.toString().padStart(2, '0')}`
+}
+
+// 근무시간 계산 함수 (출퇴근 시간 기반, 30분 단위 조정)
+const calculateWorkHours = (checkInTime: string | null, checkOutTime: string | null, scheduledCheckIn: string | null = null, scheduledCheckOut: string | null = null) => {
   if (!checkInTime || !checkOutTime) return 0
   
-  // 30분 단위로 반올림된 시간으로 계산
-  const checkInMinutes = getMinutesFromTime(checkInTime)
-  const checkOutMinutes = getMinutesFromTime(checkOutTime)
+  let adjustedCheckIn = checkInTime
+  let adjustedCheckOut = checkOutTime
+  
+  console.log('=== 근무시간 계산 디버깅 ===')
+  console.log('원본 출근시간:', checkInTime)
+  console.log('원본 퇴근시간:', checkOutTime)
+  console.log('예상 출근시간:', scheduledCheckIn)
+  console.log('예상 퇴근시간:', scheduledCheckOut)
+  
+  // 예상 출근시간이 있고, 실제 출근시간이 예상시간과 다르면 조정
+  if (scheduledCheckIn) {
+    if (checkInTime > scheduledCheckIn) {
+      // 실제 출근시간이 늦으면 30분 단위로 올림
+      adjustedCheckIn = roundUpToNearestHalfHour(checkInTime)
+      console.log('출근시간 조정됨 (늦음):', checkInTime, '→', adjustedCheckIn)
+    } else if (checkInTime < scheduledCheckIn) {
+      // 실제 출근시간이 빠르면 예상시간으로 조정
+      adjustedCheckIn = scheduledCheckIn
+      console.log('출근시간 조정됨 (빠름):', checkInTime, '→', adjustedCheckIn)
+    }
+  }
+  
+  // 예상 퇴근시간이 있고, 실제 퇴근시간이 늦으면 30분 단위로 내림
+  if (scheduledCheckOut && checkOutTime > scheduledCheckOut) {
+    adjustedCheckOut = roundDownToNearestHalfHour(checkOutTime)
+    console.log('퇴근시간 조정됨:', checkOutTime, '→', adjustedCheckOut)
+  }
+  
+  // 조정된 시간을 직접 분으로 변환 (반올림 없이)
+  const getMinutesFromAdjustedTime = (timeStr: string) => {
+    const [hours, minutes] = timeStr.split(':').map(Number)
+    return hours * 60 + minutes
+  }
+  
+  const checkInMinutes = getMinutesFromAdjustedTime(adjustedCheckIn)
+  const checkOutMinutes = getMinutesFromAdjustedTime(adjustedCheckOut)
+  
+  console.log('조정된 출근시간(분):', checkInMinutes, '(', adjustedCheckIn, ')')
+  console.log('조정된 퇴근시간(분):', checkOutMinutes, '(', adjustedCheckOut, ')')
   
   // 퇴근시간이 출근시간보다 작으면 다음날로 간주 (야간근무)
   let workMinutes = checkOutMinutes - checkInMinutes
@@ -214,22 +280,31 @@ const calculateWorkHours = (checkInTime: string | null, checkOutTime: string | n
     workMinutes += 24 * 60 // 24시간 추가
   }
   
-  return workMinutes / 60
+  const workHours = workMinutes / 60
+  console.log('총 근무시간(분):', workMinutes, '시간:', workHours)
+  console.log('=== 디버깅 끝 ===')
+  
+  return workHours
 }
 
 // 휴식시간을 제외한 근무시간 계산 함수
 const calculateNetWorkHours = (checkInTime: string | null, checkOutTime: string | null, breakTime: string | null, isHoliday: boolean = false, scheduledCheckIn: string | null = null, scheduledCheckOut: string | null = null) => {
   if (!checkInTime || !checkOutTime) return 0
   
+  console.log('=== 순 근무시간 계산 디버깅 ===')
+  
   // 야간근무 여부 확인 (16:30 ~ 다음날 09:30) - 예상 출퇴근시간 기준
   const isNightShift = isNightShiftWork(checkInTime, checkOutTime, scheduledCheckIn, scheduledCheckOut)
   
   // 야간근무인 경우 14시간으로 고정
   if (isNightShift) {
+    console.log('야간근무로 14시간 고정')
+    console.log('=== 순 근무시간 디버깅 끝 ===')
     return 14
   }
   
-  const totalWorkHours = calculateWorkHours(checkInTime, checkOutTime)
+  const totalWorkHours = calculateWorkHours(checkInTime, checkOutTime, scheduledCheckIn, scheduledCheckOut)
+  console.log('총 근무시간:', totalWorkHours, '시간')
   
   // 휴식시간 계산 (분 단위)
   const getBreakTimeMinutes = (breakTimeStr: string | null) => {
@@ -239,17 +314,27 @@ const calculateNetWorkHours = (checkInTime: string | null, checkOutTime: string 
   }
   
   const breakTimeMinutes = getBreakTimeMinutes(breakTime)
-  const breakTimeHours = breakTimeMinutes / 60
+  const breakTimeHoursForRecord = breakTimeMinutes / 60
+  
+  console.log('휴식시간:', breakTime, '(', breakTimeHoursForRecord, '시간)')
   
   // 총 근무시간에서 휴식시간 제외
-  const netWorkHours = totalWorkHours - breakTimeHours
+  const netWorkHours = totalWorkHours - breakTimeHoursForRecord
+  
+  console.log('순 근무시간:', netWorkHours, '시간')
   
   // 휴일에 야간근무가 아닌 사람이 8시간 이상 근무한 경우 8시간으로 고정
   if (isHoliday && !isNightShift && netWorkHours >= 8) {
+    console.log('휴일 8시간 제한 적용')
+    console.log('=== 순 근무시간 디버깅 끝 ===')
     return 8
   }
   
-  return Math.max(0, netWorkHours) // 음수가 되지 않도록
+  const finalHours = Math.max(0, netWorkHours) // 음수가 되지 않도록
+  console.log('최종 순 근무시간:', finalHours, '시간')
+  console.log('=== 순 근무시간 디버깅 끝 ===')
+  
+  return finalHours
 }
 
 // 근무 통계 계산
@@ -275,7 +360,7 @@ const workStats = computed(() => {
       }
       
       // 실제 출퇴근 시간으로 근무시간 계산
-      const actualWorkHours = calculateWorkHours(record.check_in, record.check_out)
+      const actualWorkHours = calculateWorkHours(record.check_in, record.check_out, record.scheduled_check_in, record.scheduled_check_out)
       
       // 휴식시간 계산 (분 단위)
       const getBreakTimeMinutes = (breakTimeStr: string | null) => {
@@ -294,12 +379,28 @@ const workStats = computed(() => {
       if (isHolidayWork) {
         // 야간근무가 아닌 경우 9:00~18:00 사이의 근무만 휴일출근시간으로 인정
         if (!record.is_night_shift) {
-          const checkInTime = record.check_in
-          const checkOutTime = record.check_out
+          let adjustedCheckIn = record.check_in
+          let adjustedCheckOut = record.check_out
+          
+          // 예상 출근시간이 있고, 실제 출근시간이 늦으면 30분 단위로 올림
+          if (record.scheduled_check_in) {
+            if (record.check_in > record.scheduled_check_in) {
+              // 실제 출근시간이 늦으면 30분 단위로 올림
+              adjustedCheckIn = roundUpToNearestHalfHour(record.check_in)
+            } else if (record.check_in < record.scheduled_check_in) {
+              // 실제 출근시간이 빠르면 예상시간으로 조정
+              adjustedCheckIn = record.scheduled_check_in
+            }
+          }
+          
+          // 예상 퇴근시간이 있고, 실제 퇴근시간이 늦으면 30분 단위로 내림
+          if (record.scheduled_check_out && record.check_out > record.scheduled_check_out) {
+            adjustedCheckOut = roundDownToNearestHalfHour(record.check_out)
+          }
           
           // 30분 단위로 반올림된 시간으로 계산
-          const checkInMinutes = getMinutesFromTime(checkInTime)
-          const checkOutMinutes = getMinutesFromTime(checkOutTime)
+          const checkInMinutes = getMinutesFromTime(adjustedCheckIn)
+          const checkOutMinutes = getMinutesFromTime(adjustedCheckOut)
           
           // 9:00 (540분) ~ 18:00 (1080분) 사이의 근무시간 계산
           const workStartMinutes = Math.max(checkInMinutes, 540) // 9:00
@@ -363,9 +464,28 @@ const workStats = computed(() => {
 const calculateShiftHours = (checkInTime: string | null, checkOutTime: string | null, breakTime: string | null, isHoliday: boolean = false, scheduledCheckIn: string | null = null, scheduledCheckOut: string | null = null) => {
   if (!checkInTime || !checkOutTime) return { early: 0, late: 0, day: 0 }
   
+  let adjustedCheckIn = checkInTime
+  let adjustedCheckOut = checkOutTime
+  
+  // 예상 출근시간이 있고, 실제 출근시간이 예상시간과 다르면 조정
+  if (scheduledCheckIn) {
+    if (checkInTime > scheduledCheckIn) {
+      // 실제 출근시간이 늦으면 30분 단위로 올림
+      adjustedCheckIn = roundUpToNearestHalfHour(checkInTime)
+    } else if (checkInTime < scheduledCheckIn) {
+      // 실제 출근시간이 빠르면 예상시간으로 조정
+      adjustedCheckIn = scheduledCheckIn
+    }
+  }
+  
+  // 예상 퇴근시간이 있고, 실제 퇴근시간이 늦으면 30분 단위로 내림
+  if (scheduledCheckOut && checkOutTime > scheduledCheckOut) {
+    adjustedCheckOut = roundDownToNearestHalfHour(checkOutTime)
+  }
+  
   // 30분 단위로 반올림된 시간으로 계산
-  const checkInMinutes = getMinutesFromTime(checkInTime)
-  const checkOutMinutes = getMinutesFromTime(checkOutTime)
+  const checkInMinutes = getMinutesFromTime(adjustedCheckIn)
+  const checkOutMinutes = getMinutesFromTime(adjustedCheckOut)
   
   // 야간근무 여부 확인 (16:30 ~ 다음날 09:30) - 예상 출퇴근시간 기준
   const isNightShift = isNightShiftWork(checkInTime, checkOutTime, scheduledCheckIn, scheduledCheckOut)

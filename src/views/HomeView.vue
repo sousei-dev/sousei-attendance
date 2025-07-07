@@ -39,37 +39,47 @@ const updateFormattedDate = () => {
 }
 
 onMounted(async () => {
-  // 캐시 완전 초기화
-  clearCache()
-  
-  // Supabase 데이터 초기화
-  await store.initialize()
-  
-  // 데이터 다시 로드
-  await store.loadAttendanceRecords()
-  
-  // 강제로 computed 재계산을 위한 지연
-  await new Promise(resolve => setTimeout(resolve, 200))
-
-  // 초기 포맷팅
-  updateFormattedTime()
-  updateFormattedDate()
-
-  // 실시간 시간 업데이트 시작
-  timeInterval = setInterval(() => {
-    const newTime = new Date()
-    const oldHour = currentTime.value.getHours()
-    const newHour = newTime.getHours()
+  try {
+    // 캐시 완전 초기화
+    clearCache()
     
-    // 시간이 바뀌면 캐시 초기화 (특히 00시, 06시, 18시)
-    if (oldHour !== newHour) {
-      clearCache()
+    // 이미 데이터가 로드되어 있는지 확인
+    if (store.employees.length === 0 || store.attendanceRecords.length === 0) {
+      // Supabase 데이터 초기화
+      await store.initialize()
+      
+      // 데이터 다시 로드
+      await store.loadAttendanceRecords()
     }
     
-    currentTime.value = newTime
+    // 강제로 computed 재계산을 위한 지연
+    await new Promise(resolve => setTimeout(resolve, 200))
+
+    // 초기 포맷팅
     updateFormattedTime()
     updateFormattedDate()
-  }, 1000)
+
+    // 실시간 시간 업데이트 시작
+    timeInterval = setInterval(() => {
+      const newTime = new Date()
+      const oldHour = currentTime.value.getHours()
+      const newHour = newTime.getHours()
+      
+      // 시간이 바뀌면 캐시 초기화 (특히 00시, 06시, 18시)
+      if (oldHour !== newHour) {
+        clearCache()
+      }
+      
+      currentTime.value = newTime
+      updateFormattedTime()
+      updateFormattedDate()
+    }, 1000)
+    
+  } catch (error) {
+    console.error('페이지 초기화 중 에러 발생:', error)
+    // 에러 발생 시에도 로딩 상태를 false로 설정
+    store.loading = false
+  }
 })
 
 onUnmounted(() => {
@@ -161,7 +171,6 @@ const employeeRecords = computed(() => {
       // 야간 근무자만
       if (tomorrowRecord && tomorrowRecord.is_night_shift) {
         record = tomorrowRecord
-        console.log(`야간 근무자 발견 (다음날): ${employee.employee_code}, ${tomorrowDate}`, record)
       }
     }
     
@@ -201,16 +210,6 @@ const employeeStatuses = computed(() => {
       statuses[employee.id] = 'checked-in'
     } else {
       statuses[employee.id] = 'not-checked'
-    }
-    
-    // 야간 근무자 디버깅 로그
-    if (record && record.is_night_shift) {
-      console.log(`야간 근무자 상태: ${employee.employee_code}`, {
-        check_in: record.check_in,
-        check_out: record.check_out,
-        status: statuses[employee.id],
-        is_night_shift: record.is_night_shift
-      })
     }
   })
   

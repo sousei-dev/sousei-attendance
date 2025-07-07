@@ -58,7 +58,7 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
       targetDate = `${year}-${month}-${day}`
     }
     
-    // 18시 이후: 다음날 야간 근무 기록 + 오늘 일반 근무 기록
+    // 18시 이후: 다음날 야간 근무 기록
     if (currentHour >= 18) {
       const tomorrow = new Date(now)
       tomorrow.setDate(tomorrow.getDate() + 1)
@@ -126,31 +126,28 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
 
   // 직원 목록 로드
   const loadEmployees = async () => {
-    loading.value = true
-    error.value = null
-
     try {
-      const { data, error: supabaseError } = await supabase
+      const query = supabase
         .from('employees')
         .select('*')
         .order('employee_code')
-
-      if (supabaseError) throw supabaseError
+      
+      const { data, error: supabaseError } = await query
+      
+      if (supabaseError) {
+        throw supabaseError
+      }
 
       employees.value = data || []
     } catch (err) {
       error.value = err instanceof Error ? err.message : '従業員リストの読み込みに失敗しました。'
       console.error('Error loading employees:', err)
-    } finally {
-      loading.value = false
+      throw err
     }
   }
 
   // 출퇴근 기록 로드
   const loadAttendanceRecords = async (startDate?: string, endDate?: string) => {
-    loading.value = true
-    error.value = null
-
     try {
       let query = supabase
         .from('attendance_records')
@@ -165,15 +162,16 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
       }
 
       const { data, error: supabaseError } = await query
-
-      if (supabaseError) throw supabaseError
+      
+      if (supabaseError) {
+        throw supabaseError
+      }
 
       attendanceRecords.value = data || []
     } catch (err) {
       error.value = err instanceof Error ? err.message : '出退勤記録の読み込みに失敗しました。'
       console.error('Error loading attendance records:', err)
-    } finally {
-      loading.value = false
+      throw err
     }
   }
 
@@ -564,7 +562,27 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
 
   // 초기 데이터 로드
   const initialize = async () => {
-    await Promise.all([loadEmployees(), loadAttendanceRecords(), loadFacilities()])
+    // 이미 로딩 중이면 중복 실행 방지
+    if (loading.value) {
+      return
+    }
+    
+    // 이미 데이터가 로드되어 있는지 확인
+    if (employees.value.length > 0 && attendanceRecords.value.length > 0) {
+      return
+    }
+    
+    loading.value = true
+    error.value = null
+    
+    try {
+      await Promise.all([loadEmployees(), loadAttendanceRecords(), loadFacilities()])
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : '初期化に失敗しました。'
+      console.error('Initialization error:', err)
+    } finally {
+      loading.value = false
+    }
   }
 
   return {
