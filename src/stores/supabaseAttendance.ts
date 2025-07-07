@@ -14,9 +14,13 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
   // auth store 가져오기
   const authStore = useAuthStore()
 
-  // 현재 날짜
+  // 현재 날짜 (로컬 시간 기준)
   const currentDate = computed(() => {
-    return new Date().toISOString().split('T')[0]
+    const now = new Date()
+    const year = now.getFullYear()
+    const month = String(now.getMonth() + 1).padStart(2, '0')
+    const day = String(now.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
   })
 
   // 활성 직원들 (role과 facility_id에 따라 필터링)
@@ -48,14 +52,20 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
     if (currentHour < 6) {
       const yesterday = new Date(now)
       yesterday.setDate(yesterday.getDate() - 1)
-      targetDate = yesterday.toISOString().split('T')[0]
+      const year = yesterday.getFullYear()
+      const month = String(yesterday.getMonth() + 1).padStart(2, '0')
+      const day = String(yesterday.getDate()).padStart(2, '0')
+      targetDate = `${year}-${month}-${day}`
     }
     
     // 18시 이후: 다음날 야간 근무 기록 + 오늘 일반 근무 기록
     if (currentHour >= 18) {
       const tomorrow = new Date(now)
       tomorrow.setDate(tomorrow.getDate() + 1)
-      const tomorrowDate = tomorrow.toISOString().split('T')[0]
+      const year = tomorrow.getFullYear()
+      const month = String(tomorrow.getMonth() + 1).padStart(2, '0')
+      const day = String(tomorrow.getDate()).padStart(2, '0')
+      const tomorrowDate = `${year}-${month}-${day}`
       
       // 오늘 일반 근무 기록 (퇴근한 사람들 포함)
       const todayRecords = attendanceRecords.value.filter((record) => 
@@ -72,11 +82,14 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
       return [...todayRecords, ...tomorrowNightRecords]
     }
     
-    // 6시~18시 사이: 오늘 기록 + 전날 야간 근무 기록 (아직 퇴근하지 않은 사람들)
+    // 6시~18시 사이: 오늘 기록 + 전날 야간 근무 기록 (아직 퇴근하지 않은 사람들만)
     if (currentHour >= 6 && currentHour < 18) {
       const yesterday = new Date(now)
       yesterday.setDate(yesterday.getDate() - 1)
-      const yesterdayDate = yesterday.toISOString().split('T')[0]
+      const year = yesterday.getFullYear()
+      const month = String(yesterday.getMonth() + 1).padStart(2, '0')
+      const day = String(yesterday.getDate()).padStart(2, '0')
+      const yesterdayDate = `${year}-${month}-${day}`
       
       // 오늘 기록
       const todayRecords = attendanceRecords.value.filter((record) => record.date === targetDate)
@@ -186,14 +199,20 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
       if (currentHour >= 18) {
         const tomorrow = new Date(now)
         tomorrow.setDate(tomorrow.getDate() + 1)
-        targetDate = tomorrow.toISOString().split('T')[0]
+        const year = tomorrow.getFullYear()
+        const month = String(tomorrow.getMonth() + 1).padStart(2, '0')
+        const day = String(tomorrow.getDate()).padStart(2, '0')
+        targetDate = `${year}-${month}-${day}`
       }
       
       // 06시 이전: 전날 야간 근무
       if (currentHour < 6) {
         const yesterday = new Date(now)
         yesterday.setDate(yesterday.getDate() - 1)
-        targetDate = yesterday.toISOString().split('T')[0]
+        const year = yesterday.getFullYear()
+        const month = String(yesterday.getMonth() + 1).padStart(2, '0')
+        const day = String(yesterday.getDate()).padStart(2, '0')
+        targetDate = `${year}-${month}-${day}`
       }
 
       // 중복 출근 확인 (야간 근무 고려)
@@ -208,7 +227,10 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
         // 전날 야간 근무 기록 확인
         const yesterday = new Date(now)
         yesterday.setDate(yesterday.getDate() - 1)
-        const yesterdayDate = yesterday.toISOString().split('T')[0]
+        const year = yesterday.getFullYear()
+        const month = String(yesterday.getMonth() + 1).padStart(2, '0')
+        const day = String(yesterday.getDate()).padStart(2, '0')
+        const yesterdayDate = `${year}-${month}-${day}`
         existingRecord = attendanceRecords.value.find(
           (r) => r.employee_id === employeeId && 
                  r.date === yesterdayDate &&
@@ -221,7 +243,10 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
       if (!existingRecord) {
         const tomorrow = new Date(now)
         tomorrow.setDate(tomorrow.getDate() + 1)
-        const tomorrowDate = tomorrow.toISOString().split('T')[0]
+        const year = tomorrow.getFullYear()
+        const month = String(tomorrow.getMonth() + 1).padStart(2, '0')
+        const day = String(tomorrow.getDate()).padStart(2, '0')
+        const tomorrowDate = `${year}-${month}-${day}`
         existingRecord = attendanceRecords.value.find(
           (r) => r.employee_id === employeeId && 
                  r.date === tomorrowDate &&

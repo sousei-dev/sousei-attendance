@@ -14,6 +14,12 @@ const formattedDate = ref('')
 // 실시간 시간 업데이트
 let timeInterval: ReturnType<typeof setInterval> | null = null
 
+// 캐시 초기화 함수
+const clearCache = () => {
+  employeeRecordCache.value = {}
+  employeeExpectedTimes.value = {}
+}
+
 // 시간과 날짜 포맷팅 함수
 const updateFormattedTime = () => {
   formattedTime.value = currentTime.value.toLocaleTimeString('ja-JP', {
@@ -34,8 +40,7 @@ const updateFormattedDate = () => {
 
 onMounted(async () => {
   // 캐시 완전 초기화
-  employeeRecordCache.value = {}
-  employeeExpectedTimes.value = {}
+  clearCache()
   
   // Supabase 데이터 초기화
   await store.initialize()
@@ -52,7 +57,16 @@ onMounted(async () => {
 
   // 실시간 시간 업데이트 시작
   timeInterval = setInterval(() => {
-    currentTime.value = new Date()
+    const newTime = new Date()
+    const oldHour = currentTime.value.getHours()
+    const newHour = newTime.getHours()
+    
+    // 시간이 바뀌면 캐시 초기화 (특히 00시, 06시, 18시)
+    if (oldHour !== newHour) {
+      clearCache()
+    }
+    
+    currentTime.value = newTime
     updateFormattedTime()
     updateFormattedDate()
   }, 1000)
@@ -118,15 +132,18 @@ const employeeRecords = computed(() => {
     // 먼저 오늘 기록 확인
     record = store.getEmployeeRecord(employee.id, store.currentDate)
     
-    // 오늘 기록이 없으면 전날 기록 확인 (야간 근무자만)
+    // 오늘 기록이 없으면 전날 기록 확인 (야간 근무자만, 아직 퇴근하지 않은 경우)
     if (!record) {
       const yesterday = new Date()
       yesterday.setDate(yesterday.getDate() - 1)
-      const yesterdayDate = yesterday.toISOString().split('T')[0]
+      const year = yesterday.getFullYear()
+      const month = String(yesterday.getMonth() + 1).padStart(2, '0')
+      const day = String(yesterday.getDate()).padStart(2, '0')
+      const yesterdayDate = `${year}-${month}-${day}`
       const yesterdayRecord = store.getEmployeeRecord(employee.id, yesterdayDate)
       
-      // 야간 근무 판단: is_night_shift 필드 사용
-      if (yesterdayRecord && yesterdayRecord.is_night_shift) {
+      // 야간 근무자이고 아직 퇴근하지 않은 경우만
+      if (yesterdayRecord && yesterdayRecord.is_night_shift && yesterdayRecord.check_in && !yesterdayRecord.check_out) {
         record = yesterdayRecord
       }
     }
@@ -135,10 +152,13 @@ const employeeRecords = computed(() => {
     if (!record) {
       const tomorrow = new Date()
       tomorrow.setDate(tomorrow.getDate() + 1)
-      const tomorrowDate = tomorrow.toISOString().split('T')[0]
+      const year = tomorrow.getFullYear()
+      const month = String(tomorrow.getMonth() + 1).padStart(2, '0')
+      const day = String(tomorrow.getDate()).padStart(2, '0')
+      const tomorrowDate = `${year}-${month}-${day}`
       const tomorrowRecord = store.getEmployeeRecord(employee.id, tomorrowDate)
       
-      // 야간 근무 판단: is_night_shift 필드 사용
+      // 야간 근무자만
       if (tomorrowRecord && tomorrowRecord.is_night_shift) {
         record = tomorrowRecord
         console.log(`야간 근무자 발견 (다음날): ${employee.employee_code}, ${tomorrowDate}`, record)
@@ -287,8 +307,7 @@ const handleAttendanceAction = async (employeeId: string) => {
     }
     
     // 캐시 완전 무효화
-    employeeRecordCache.value = {}
-    employeeExpectedTimes.value = {}
+    clearCache()
     
     // 데이터 다시 로드
     await store.loadAttendanceRecords()
@@ -369,7 +388,10 @@ const getEmployeeExpectedTime = (employeeId: string, type: 'checkIn' | 'checkOut
     if (!record) {
       const yesterday = new Date()
       yesterday.setDate(yesterday.getDate() - 1)
-      const yesterdayDate = yesterday.toISOString().split('T')[0]
+      const year = yesterday.getFullYear()
+      const month = String(yesterday.getMonth() + 1).padStart(2, '0')
+      const day = String(yesterday.getDate()).padStart(2, '0')
+      const yesterdayDate = `${year}-${month}-${day}`
       const yesterdayRecord = store.getEmployeeRecord(employeeId, yesterdayDate)
       if (yesterdayRecord && yesterdayRecord.is_night_shift) {
         record = yesterdayRecord
@@ -380,7 +402,10 @@ const getEmployeeExpectedTime = (employeeId: string, type: 'checkIn' | 'checkOut
     if (!record) {
       const tomorrow = new Date()
       tomorrow.setDate(tomorrow.getDate() + 1)
-      const tomorrowDate = tomorrow.toISOString().split('T')[0]
+      const year = tomorrow.getFullYear()
+      const month = String(tomorrow.getMonth() + 1).padStart(2, '0')
+      const day = String(tomorrow.getDate()).padStart(2, '0')
+      const tomorrowDate = `${year}-${month}-${day}`
       const tomorrowRecord = store.getEmployeeRecord(employeeId, tomorrowDate)
       if (tomorrowRecord && tomorrowRecord.is_night_shift) {
         record = tomorrowRecord
@@ -412,7 +437,10 @@ const setEmployeeExpectedTime = (employeeId: string, type: 'checkIn' | 'checkOut
     if (!record) {
       const yesterday = new Date()
       yesterday.setDate(yesterday.getDate() - 1)
-      const yesterdayDate = yesterday.toISOString().split('T')[0]
+      const year = yesterday.getFullYear()
+      const month = String(yesterday.getMonth() + 1).padStart(2, '0')
+      const day = String(yesterday.getDate()).padStart(2, '0')
+      const yesterdayDate = `${year}-${month}-${day}`
       const yesterdayRecord = store.getEmployeeRecord(employeeId, yesterdayDate)
       if (yesterdayRecord && yesterdayRecord.is_night_shift) {
         record = yesterdayRecord
@@ -423,7 +451,10 @@ const setEmployeeExpectedTime = (employeeId: string, type: 'checkIn' | 'checkOut
     if (!record) {
       const tomorrow = new Date()
       tomorrow.setDate(tomorrow.getDate() + 1)
-      const tomorrowDate = tomorrow.toISOString().split('T')[0]
+      const year = tomorrow.getFullYear()
+      const month = String(tomorrow.getMonth() + 1).padStart(2, '0')
+      const day = String(tomorrow.getDate()).padStart(2, '0')
+      const tomorrowDate = `${year}-${month}-${day}`
       const tomorrowRecord = store.getEmployeeRecord(employeeId, tomorrowDate)
       if (tomorrowRecord && tomorrowRecord.is_night_shift) {
         record = tomorrowRecord
