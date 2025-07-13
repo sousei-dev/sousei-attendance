@@ -58,8 +58,8 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
       targetDate = `${year}-${month}-${day}`
     }
     
-    // 18시 이후: 다음날 야간 근무 기록
-    if (currentHour >= 18) {
+    // 16:30 이후: 다음날 야간 근무 기록
+    if (currentHour >= 16) {
       const tomorrow = new Date(now)
       tomorrow.setDate(tomorrow.getDate() + 1)
       const year = tomorrow.getFullYear()
@@ -82,8 +82,8 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
       return [...todayRecords, ...tomorrowNightRecords]
     }
     
-    // 6시~18시 사이: 오늘 기록 + 전날 야간 근무 기록 (아직 퇴근하지 않은 사람들만)
-    if (currentHour >= 6 && currentHour < 18) {
+    // 6시~16:30 사이: 오늘 기록 + 전날 야간 근무 기록 (아직 퇴근하지 않은 사람들만)
+    if (currentHour >= 6 && currentHour < 16) {
       const yesterday = new Date(now)
       yesterday.setDate(yesterday.getDate() - 1)
       const year = yesterday.getFullYear()
@@ -193,8 +193,8 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
       // 현재 시간에 따라 적절한 날짜 설정
       let targetDate = currentDate.value
       
-      // 18시 이후: 다음날 야간 근무
-      if (currentHour >= 18) {
+      // 16:30 이후: 다음날 야간 근무
+      if (currentHour >= 16) {
         const tomorrow = new Date(now)
         tomorrow.setDate(tomorrow.getDate() + 1)
         const year = tomorrow.getFullYear()
@@ -257,17 +257,20 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
         throw new Error('既に出勤処理されています。')
       }
 
-      // 야간 근무 여부 확인 (16:30 이전은 일반 근무, 18:00 이후는 야간 근무)
+      // 야간 근무 여부 확인 (16:30 이후 출근은 야간 근무)
       const currentMinutes = now.getHours() * 60 + now.getMinutes()
-      const isNightShift = currentMinutes >= 18 * 60 || currentMinutes < 6 * 60 // 18:00 이후 또는 06:00 이전
+      const isNightShift = currentMinutes >= 16 * 60 + 30 || currentMinutes < 6 * 60 // 16:30 이후 또는 06:00 이전
       
       // 야간 근무의 경우 실제 근무 날짜 계산
       let actualWorkDate = currentDate.value
-      if (isNightShift && currentHour >= 18) {
-        // 18시 이후 출근은 다음날까지 근무
+      if (isNightShift && currentHour >= 16) {
+        // 16:30 이후 출근은 다음날까지 근무
         const tomorrow = new Date(now)
         tomorrow.setDate(tomorrow.getDate() + 1)
-        actualWorkDate = tomorrow.toISOString().split('T')[0]
+        const year = tomorrow.getFullYear()
+        const month = String(tomorrow.getMonth() + 1).padStart(2, '0')
+        const day = String(tomorrow.getDate()).padStart(2, '0')
+        actualWorkDate = `${year}-${month}-${day}`
       }
 
       // 출근 시간 기준으로 상태 결정
