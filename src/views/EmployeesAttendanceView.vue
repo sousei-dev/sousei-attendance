@@ -42,7 +42,6 @@ const getDefaultEndDate = () => {
   const today = new Date()
   const currentMonth = today.getMonth()
   const currentYear = today.getFullYear()
-  const currentDay = today.getDate()
   
   // 선택된 직원의 급여 기간 종료일 확인 (안전하게 처리)
   const payPeriodEndType = selectedEmployee.value?.pay_period_end_type ? Number(selectedEmployee.value.pay_period_end_type) : 20
@@ -161,10 +160,7 @@ const isHoliday = (dateString: string) => {
   return isWeekend || isPublicHoliday
 }
 
-// 공휴일 여부 확인
-const isPublicHoliday = (dateString: string) => {
-  return holidays.value.includes(dateString)
-}
+
 
 // 시간을 30분 단위로 반올림하는 함수
 const roundToNearestHalfHour = (timeStr: string) => {
@@ -801,7 +797,7 @@ watch(selectedCompanyId, () => {
           id="company-select" 
           v-model="selectedCompanyId"
           class="company-select"
-          :disabled="authStore.isStaff && authStore.user?.company_id"
+          :disabled="authStore.isStaff && !!authStore.user?.company_id"
         >
           <option value="">会社を選択してください</option>
           <option 
