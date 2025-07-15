@@ -14,13 +14,13 @@ const selectedEmployeeId = ref('')
 const selectedCompanyId = ref('')
 
 // 날짜 선택
-const getDefaultStartDate = () => {
+const getDefaultStartDate = (employee?: { pay_period_end_type?: string | number }) => {
   const today = new Date()
   const currentMonth = today.getMonth()
   const currentYear = today.getFullYear()
   
   // 선택된 직원의 급여 기간 종료일 확인 (안전하게 처리)
-  const payPeriodEndType = selectedEmployee.value?.pay_period_end_type ? Number(selectedEmployee.value.pay_period_end_type) : 20
+  const payPeriodEndType = employee?.pay_period_end_type ? Number(employee.pay_period_end_type) : 20
   
   let startDate: Date
   
@@ -38,13 +38,13 @@ const getDefaultStartDate = () => {
   return startDate.toISOString().split('T')[0]
 }
 
-const getDefaultEndDate = () => {
+const getDefaultEndDate = (employee?: { pay_period_end_type?: string | number }) => {
   const today = new Date()
   const currentMonth = today.getMonth()
   const currentYear = today.getFullYear()
   
   // 선택된 직원의 급여 기간 종료일 확인 (안전하게 처리)
-  const payPeriodEndType = selectedEmployee.value?.pay_period_end_type ? Number(selectedEmployee.value.pay_period_end_type) : 20
+  const payPeriodEndType = employee?.pay_period_end_type ? Number(employee.pay_period_end_type) : 20
   
   let endDate: Date
   
@@ -113,27 +113,45 @@ const fetchHolidays = async (year: number) => {
 
 onMounted(async () => {
   try {
+    // auth store 초기화 확인
+    if (!authStore.user) {
+      await authStore.checkSession()
+    }
+    
     await store.initialize()
     // 현재 연도의 공휴일 가져오기
     const currentYear = new Date().getFullYear()
     await fetchHolidays(currentYear)
     
-    // staff 계정이고 company_id가 있으면 미리 설정
-    if (authStore.isStaff && authStore.user?.company_id) {
-      selectedCompanyId.value = authStore.user.company_id
-      console.log('Staff 계정의 company_id 설정:', authStore.user.company_id)
-    }
-    
+    // staff 계정의 company_id 설정은 watch에서 처리
     // 쿼리 파라미터에서 직원 ID 확인
     const employeeIdFromQuery = route.query.employeeId as string
     if (employeeIdFromQuery) {
       selectedEmployeeId.value = employeeIdFromQuery
     }
+    
+    // 날짜 범위 초기화 (직원이 선택되지 않은 상태에서는 기본값 사용)
+    startDate.value = getDefaultStartDate()
+    endDate.value = getDefaultEndDate()
   } catch (error) {
     console.error('페이지 초기화 중 에러 발생:', error)
     loading.value = false
   }
 })
+
+// store가 초기화된 후 staff 계정의 company_id 설정
+watch(() => store.companies, (companies) => {
+  if (companies.length > 0 && authStore.isStaff && authStore.user?.company_id && !selectedCompanyId.value) {
+    selectedCompanyId.value = authStore.user.company_id
+  }
+}, { immediate: true })
+
+// auth store의 사용자 정보가 변경될 때도 company_id 설정
+watch(() => authStore.user, () => {
+  if (store.companies.length > 0 && authStore.isStaff && authStore.user?.company_id && !selectedCompanyId.value) {
+    selectedCompanyId.value = authStore.user.company_id
+  }
+}, { immediate: true })
 
 // 선택된 기간의 기록 조회
 const selectedPeriodRecords = computed(() => {
@@ -241,12 +259,6 @@ const calculateWorkHours = (checkInTime: string | null, checkOutTime: string | n
   
   let adjustedCheckIn = checkInTime
   let adjustedCheckOut = checkOutTime
-  
-  console.log('=== 근무시간 계산 디버깅 ===')
-  console.log('원본 출근시간:', checkInTime)
-  console.log('원본 퇴근시간:', checkOutTime)
-  console.log('예상 출근시간:', scheduledCheckIn)
-  console.log('예상 퇴근시간:', scheduledCheckOut)
   
   // 예상 출근시간이 있고, 실제 출근시간이 예상시간과 다르면 조정
   if (scheduledCheckIn) {
@@ -756,12 +768,14 @@ const isCheckOutTimeDifferent = (record: AttendanceRecord) => {
 
 // 선택된 직원 ID가 변경될 때마다 날짜 범위를 업데이트
 watch(selectedEmployeeId, () => {
-  startDate.value = getDefaultStartDate()
-  endDate.value = getDefaultEndDate()
+  startDate.value = getDefaultStartDate(selectedEmployee.value)
+  endDate.value = getDefaultEndDate(selectedEmployee.value)
 })
 
 // 회사 선택이 변경될 때 직원 선택 초기화
-watch(selectedCompanyId, () => {
+watch(selectedCompanyId, (newCompanyId) => {
+  console.log('회사 선택 변경:', newCompanyId)
+  console.log('해당 회사의 직원 수:', store.getEmployeeByCompanyId(newCompanyId).length)
   selectedEmployeeId.value = ''
   startDate.value = getDefaultStartDate()
   endDate.value = getDefaultEndDate()
@@ -808,6 +822,9 @@ watch(selectedCompanyId, () => {
             {{ company.name }}
           </option>
         </select>
+        <div v-if="store.loading" class="loading-notice">
+          <small>회사 목록을 불러오는 중...</small>
+        </div>
       </div>
 
       <div class="employee-selector">
@@ -816,7 +833,7 @@ watch(selectedCompanyId, () => {
           id="employee-select" 
           v-model="selectedEmployeeId"
           class="employee-select"
-          :disabled="!selectedCompanyId"
+          :disabled="!selectedCompanyId || store.loading"
         >
           <option value="">従業員を選択してください</option>
           <option 
@@ -827,6 +844,9 @@ watch(selectedCompanyId, () => {
             {{ employee.employee_code }} - {{ employee.last_name }}{{ employee.first_name }} ({{ employee.facility_id ? store.getFacilityName(employee.facility_id) : '-' }})
           </option>
         </select>
+        <div v-if="store.loading" class="loading-notice">
+          <small>직원 목록을 불러오는 중...</small>
+        </div>
       </div>
 
       <div class="date-range-selector">
@@ -1166,6 +1186,12 @@ watch(selectedCompanyId, () => {
 .staff-notice {
   margin-top: 0.5rem;
   color: #6c757d;
+  font-style: italic;
+}
+
+.loading-notice {
+  margin-top: 0.5rem;
+  color: #3498db;
   font-style: italic;
 }
 
