@@ -30,7 +30,7 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
     
     // admin이면 모든 직원 반환 (facility_id 기준으로 정렬)
     if (authStore.isAdmin) {
-      return filteredEmployees.filter(emp => emp.company_id === authStore.user?.company_id)
+      return filteredEmployees
     }
     
     // staff이면 facility_id로 필터링 (이미 정렬됨)

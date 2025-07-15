@@ -837,7 +837,7 @@ watch(selectedCompanyId, (newCompanyId) => {
         >
           <option value="">従業員を選択してください</option>
           <option 
-            v-for="employee in store.activeEmployees" 
+            v-for="employee in authStore.isAdmin ? store.getEmployeeByCompanyId(selectedCompanyId) : store.activeEmployees" 
             :key="employee.id" 
             :value="employee.id"
           >
