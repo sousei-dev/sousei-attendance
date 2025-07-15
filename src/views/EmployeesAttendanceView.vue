@@ -654,6 +654,11 @@ const getTimeDifferenceText = (expectedTime: string | null, actualTime: string |
   const diff = getTimeDifference(expectedTime, actualTime)
   if (diff < 30) return ''
   
+  // 예상 시간보다 빨리 출근한 경우 차이 텍스트를 표시하지 않음
+  const expected = new Date(`2000-01-01T${expectedTime}`)
+  const actual = new Date(`2000-01-01T${actualTime}`)
+  if (actual.getTime() < expected.getTime()) return ''
+  
   const hours = Math.floor(diff / 60)
   const minutes = diff % 60
   
@@ -674,10 +679,19 @@ const getCheckOutDifferenceText = (record: AttendanceRecord) => {
   return getTimeDifferenceText(record.scheduled_check_out, record.check_out)
 }
 
-// 출근 시간 차이 확인 (30분 이상 차이나면 true)
+// 출근 시간 차이 확인 (30분 이상 늦게 출근한 경우에만 true)
 const isCheckInTimeDifferent = (record: AttendanceRecord) => {
+  if (!record.scheduled_check_in || !record.check_in) return false
+  
   const diff = getTimeDifference(record.scheduled_check_in, record.check_in)
-  return diff >= 30
+  if (diff < 30) return false
+  
+  // 예상 시간보다 빨리 출근한 경우 false 반환
+  const expected = new Date(`2000-01-01T${record.scheduled_check_in}`)
+  const actual = new Date(`2000-01-01T${record.check_in}`)
+  if (actual.getTime() < expected.getTime()) return false
+  
+  return true
 }
 
 // 퇴근 시간 차이 확인 (30분 이상 차이나면 true)

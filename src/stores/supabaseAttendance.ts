@@ -275,13 +275,21 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
 
       // 출근 시간 기준으로 상태 결정
       let status: 'present' | 'late' = 'present'
-      if (isNightShift) {
-        // 야간 근무: 항상 정상
-        status = 'present'
+      
+      // scheduledCheckIn이 있는 경우 해당 시간 기준으로 지각 여부 판단
+      if (scheduledCheckIn) {
+        const scheduledTime = new Date(`2000-01-01T${scheduledCheckIn}`)
+        const actualTime = new Date(`2000-01-01T${checkInTime}`)
+        
+        // 실제 출근시간이 예상 출근시간보다 늦으면 지각
+        if (actualTime.getTime() > scheduledTime.getTime()) {
+          status = 'late'
+        } else {
+          status = 'present'
+        }
       } else {
-        // 일반 근무: 9시 이전 정상, 이후 지각
-        const isLate = now.getHours() > 9 || (now.getHours() === 9 && now.getMinutes() > 0)
-        status = isLate ? 'late' : 'present'
+        // scheduledCheckIn이 없는 경우 정상으로 처리
+        status = 'present'
       }
 
       const { data, error: supabaseError } = await supabase
