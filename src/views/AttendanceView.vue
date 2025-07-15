@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { useAttendanceStore } from '../stores/attendance'
+import { useSupabaseAttendanceStore } from '../stores/supabaseAttendance'
 import { ref, computed } from 'vue'
 
-const store = useAttendanceStore()
+const store = useSupabaseAttendanceStore()
 const selectedEmployeeId = ref('')
 const message = ref('')
 const messageType = ref<'success' | 'error'>('success')
@@ -32,7 +32,7 @@ const handleCheckIn = () => {
   try {
     store.checkIn(selectedEmployeeId.value)
     const employee = store.getEmployeeById(selectedEmployeeId.value)
-    showMessage(`${employee?.name}님 출근 처리되었습니다.`, 'success')
+    showMessage(`${employee?.last_name}${employee?.first_name}님 출근 처리되었습니다.`, 'success')
   } catch (error) {
     showMessage(
       error instanceof Error ? error.message : '출근 처리 중 오류가 발생했습니다.',
@@ -50,7 +50,7 @@ const handleCheckOut = () => {
   try {
     store.checkOut(selectedEmployeeId.value)
     const employee = store.getEmployeeById(selectedEmployeeId.value)
-    showMessage(`${employee?.name}님 퇴근 처리되었습니다.`, 'success')
+    showMessage(`${employee?.last_name}${employee?.first_name}님 퇴근 처리되었습니다.`, 'success')
   } catch (error) {
     showMessage(
       error instanceof Error ? error.message : '퇴근 처리 중 오류가 발생했습니다.',
@@ -62,8 +62,8 @@ const handleCheckOut = () => {
 const getEmployeeStatus = (employeeId: string) => {
   const record = store.getEmployeeRecord(employeeId, store.currentDate)
   if (!record) return 'not-checked'
-  if (record.checkIn && record.checkOut) return 'checked-out'
-  if (record.checkIn) return 'checked-in'
+  if (record.check_in && record.check_out) return 'checked-out'
+  if (record.check_in) return 'checked-in'
   return 'not-checked'
 }
 
@@ -118,7 +118,7 @@ const getStatusColor = (status: string) => {
                 :key="employee.id"
                 :value="employee.id"
               >
-                {{ employee.name }} ({{ employee.department }})
+                {{ employee.last_name }}{{ employee.first_name }} ({{ employee.facility_id ? store.getFacilityName(employee.facility_id) : '-' }})
               </option>
             </select>
           </div>
@@ -151,12 +151,12 @@ const getStatusColor = (status: string) => {
         >
           <div class="employee-header">
             <div class="employee-avatar">
-              {{ employee.name.charAt(0) }}
+              {{ employee.last_name.charAt(0) }}
             </div>
             <div class="employee-info">
-              <div class="employee-name">{{ employee.name }}</div>
-              <div class="employee-dept">{{ employee.department }}</div>
-              <div class="employee-position">{{ employee.position }}</div>
+              <div class="employee-name">{{ employee.last_name }}{{ employee.first_name }}</div>
+              <div class="employee-dept">{{ employee.facility_id ? store.getFacilityName(employee.facility_id) : '-' }}</div>
+              <div class="employee-position">{{ employee.category_1 }}</div>
             </div>
             <div
               class="status-badge"
@@ -169,34 +169,24 @@ const getStatusColor = (status: string) => {
           <div class="attendance-details">
             <div v-if="store.getEmployeeRecord(employee.id, store.currentDate)" class="time-info">
               <div
-                v-if="store.getEmployeeRecord(employee.id, store.currentDate)?.checkIn"
+                v-if="store.getEmployeeRecord(employee.id, store.currentDate)?.check_in"
                 class="time-item"
               >
                 <span class="time-label">출근:</span>
                 <span class="time-value">{{
-                  store.getEmployeeRecord(employee.id, store.currentDate)?.checkIn
+                  store.getEmployeeRecord(employee.id, store.currentDate)?.check_in
                 }}</span>
               </div>
               <div
-                v-if="store.getEmployeeRecord(employee.id, store.currentDate)?.checkOut"
+                v-if="store.getEmployeeRecord(employee.id, store.currentDate)?.check_out"
                 class="time-item"
               >
                 <span class="time-label">퇴근:</span>
                 <span class="time-value">{{
-                  store.getEmployeeRecord(employee.id, store.currentDate)?.checkOut
+                  store.getEmployeeRecord(employee.id, store.currentDate)?.check_out
                 }}</span>
               </div>
-              <div
-                v-if="store.getEmployeeRecord(employee.id, store.currentDate)?.totalHours"
-                class="time-item"
-              >
-                <span class="time-label">근무시간:</span>
-                <span class="time-value"
-                  >{{
-                    store.getEmployeeRecord(employee.id, store.currentDate)?.totalHours
-                  }}시간</span
-                >
-              </div>
+
             </div>
             <div v-else class="no-record">아직 출/퇴근 기록이 없습니다.</div>
           </div>

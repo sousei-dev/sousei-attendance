@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { supabase, type Employee, type AttendanceRecord, type Facility } from '@/lib/supabase'
+import { supabase, type Employee, type AttendanceRecord, type Facility, type Company } from '@/lib/supabase'
 import { useAuthStore } from './auth'
 
 export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () => {
@@ -8,6 +8,7 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
   const employees = ref<Employee[]>([])
   const attendanceRecords = ref<AttendanceRecord[]>([])
   const facilities = ref<Facility[]>([])
+  const companies = ref<Company[]>([])
   const loading = ref(false)
   const error = ref<string | null>(null)
 
@@ -34,7 +35,7 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
     
     // staff이면 facility_id로 필터링 (이미 정렬됨)
     if (authStore.isStaff && authStore.user?.facility_id) {
-      return filteredEmployees.filter(emp => emp.facility_id === authStore.user?.facility_id)
+      return filteredEmployees.filter(emp => emp.facility_id === authStore.user?.facility_id && emp.company_id === authStore.user?.company_id)
     }
     
     // 일반 사용자이거나 facility_id가 없는 경우 빈 배열 반환
@@ -124,6 +125,11 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
     return employees.value.find((emp) => emp.id === employeeId)
   }
 
+  // 회사별 직원 목록 조회
+  const getEmployeeByCompanyId = (companyId: string) => {
+    return employees.value.filter((emp) => emp.company_id === companyId && emp.is_active)
+  }
+
   // 직원 목록 로드
   const loadEmployees = async () => {
     try {
@@ -142,6 +148,28 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
     } catch (err) {
       error.value = err instanceof Error ? err.message : '従業員リストの読み込みに失敗しました。'
       console.error('Error loading employees:', err)
+      throw err
+    }
+  }
+
+  // 직원 목록 로드
+  const loadCompanies = async () => {
+    try {
+      const query = supabase
+        .from('companies')
+        .select('*')
+        .order('created_at', { ascending: false })
+      
+      const { data, error: supabaseError } = await query
+      
+      if (supabaseError) {
+        throw supabaseError
+      }
+
+      companies.value = data || []
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : '会社リストの読み込みに失敗しました。'
+      console.error('Error loading companies:', err)
       throw err
     }
   }
@@ -587,7 +615,7 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
     error.value = null
     
     try {
-      await Promise.all([loadEmployees(), loadAttendanceRecords(), loadFacilities()])
+      await Promise.all([loadEmployees(), loadCompanies(), loadAttendanceRecords(), loadFacilities()])
     } catch (err) {
       error.value = err instanceof Error ? err.message : '初期化に失敗しました。'
       console.error('Initialization error:', err)
@@ -599,6 +627,7 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
   return {
     // 상태
     employees,
+    companies,
     attendanceRecords,
     facilities,
     loading,
@@ -612,8 +641,10 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
     // 메서드
     getEmployeeRecord,
     getEmployeeById,
+    getEmployeeByCompanyId,
     getFacilityName,
     loadEmployees,
+    loadCompanies,
     loadAttendanceRecords,
     loadFacilities,
     checkIn,

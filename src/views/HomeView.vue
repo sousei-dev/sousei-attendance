@@ -111,7 +111,7 @@ const filteredEmployees = computed(() => {
     (employee) =>
       employee.employee_code.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
       `${employee.last_name}${employee.first_name}`.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
-      employee.department.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
+      (employee.facility_id && store.getFacilityName(employee.facility_id).toLowerCase().includes(searchQuery.value.toLowerCase())) ||
       employee.category_1.toLowerCase().includes(searchQuery.value.toLowerCase()),
   )
 })
@@ -497,7 +497,9 @@ const autoSetBreakTime = (employeeId: string) => {
     const workHours = workMinutes / 60
     
     // 6시간 이상 근무 시 1시간 휴게시간 자동 설정
-    if (workHours >= 6) {
+    if (workHours >= 14) {
+      setEmployeeExpectedTime(employeeId, 'breakTime', '03:00')
+    } else if (workHours >= 6) {
       setEmployeeExpectedTime(employeeId, 'breakTime', '01:00')
     } else if (workHours >= 4) {
       setEmployeeExpectedTime(employeeId, 'breakTime', '00:30')
@@ -541,6 +543,20 @@ const handleBreakTimeChange = (employeeId: string, event: Event) => {
   setEmployeeExpectedTime(employeeId, 'breakTime', target.value)
 }
 
+// 日勤 설정 함수
+const setDayShift = (employeeId: string) => {
+  setEmployeeExpectedTime(employeeId, 'checkIn', '09:00')
+  setEmployeeExpectedTime(employeeId, 'checkOut', '18:00')
+  setEmployeeExpectedTime(employeeId, 'breakTime', '01:00')
+}
+
+// 夜勤 설정 함수
+const setNightShift = (employeeId: string) => {
+  setEmployeeExpectedTime(employeeId, 'checkIn', '16:30')
+  setEmployeeExpectedTime(employeeId, 'checkOut', '09:30')
+  setEmployeeExpectedTime(employeeId, 'breakTime', '03:00')
+}
+
 // 모달 상태 관리
 const showEmployeeModal = ref(false)
 const selectedEmployeeForModal = ref<Employee | null>(null)
@@ -551,6 +567,15 @@ const openEmployeeModal = (employee: Employee) => {
 }
 
 const closeEmployeeModal = () => {
+  // 입력했던 값들 초기화 (모달을 닫기 전에 먼저 처리)
+  if (selectedEmployeeForModal.value) {
+    const employeeId = selectedEmployeeForModal.value.id
+    // 해당 직원의 예상 시간 캐시 삭제
+    delete employeeExpectedTimes.value[employeeId]
+    // 해당 직원의 기록 캐시 삭제
+    delete employeeRecordCache.value[employeeId]
+  }
+  
   showEmployeeModal.value = false
   selectedEmployeeForModal.value = null
 }
@@ -647,7 +672,7 @@ const closeEmployeeModal = () => {
           <div v-for="employee in filteredEmployees" :key="employee.id" class="employee-row" @click="openEmployeeModal(employee)">
             <div class="cell employee-code">{{ employee.employee_code }}</div>
             <div class="cell employee-name">{{ employee.last_name }}{{ employee.first_name }}</div>
-            <div class="cell employee-dept">{{ employee.department }}</div>
+            <div class="cell employee-dept">{{ employee.facility_id ? store.getFacilityName(employee.facility_id) : '-' }}</div>
             <div class="cell employee-position">{{ employee.category_1 }}</div>
             <div class="cell status">
               <span
@@ -677,6 +702,22 @@ const closeEmployeeModal = () => {
           </div>
           <div class="modal-main-section">
             <div class="modal-left-section">
+              <div class="shift-type-buttons">
+                <button
+                  @click="setDayShift(selectedEmployeeForModal.id)"
+                  :disabled="getEmployeeStatus(selectedEmployeeForModal.id) !== 'not-checked'"
+                  class="shift-type-btn day-shift-btn"
+                >
+                  日勤
+                </button>
+                <button
+                  @click="setNightShift(selectedEmployeeForModal.id)"
+                  :disabled="getEmployeeStatus(selectedEmployeeForModal.id) !== 'not-checked'"
+                  class="shift-type-btn night-shift-btn"
+                >
+                  夜勤
+                </button>
+              </div>
               <div class="input-section">
                 <div>
                   <span class="info-label">予想出勤時間:</span>
@@ -1710,6 +1751,65 @@ const closeEmployeeModal = () => {
   font-size: 1.8rem;
   font-weight: 700;
   color: #2c3e50;
+}
+
+.shift-type-buttons {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.shift-type-btn {
+  flex: 1;
+  padding: 1rem 1.5rem;
+  border: none;
+  border-radius: 12px;
+  font-size: 1.4rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  min-height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.day-shift-btn {
+  background: #3498db;
+  color: white;
+  box-shadow: 0 4px 15px rgba(52, 152, 219, 0.3);
+}
+
+.day-shift-btn:hover:not(:disabled) {
+  background: #2980b9;
+  transform: translateY(-3px);
+  box-shadow: 0 8px 25px rgba(52, 152, 219, 0.4);
+}
+
+.day-shift-btn:disabled {
+  background: #b2bec3;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.night-shift-btn {
+  background: #2c3e50;
+  color: white;
+  box-shadow: 0 4px 15px rgba(44, 62, 80, 0.3);
+}
+
+.night-shift-btn:hover:not(:disabled) {
+  background: #34495e;
+  transform: translateY(-3px);
+  box-shadow: 0 8px 25px rgba(44, 62, 80, 0.4);
+}
+
+.night-shift-btn:disabled {
+  background: #b2bec3;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
 }
 </style>
 

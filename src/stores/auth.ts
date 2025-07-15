@@ -56,7 +56,7 @@ export const useAuthStore = defineStore('auth', () => {
           
           const userDataPromise = supabase
             .from('users')
-            .select('id, email, role, facility_id')
+            .select('id, email, role, facility_id, company_id')
             .eq('id', session.user.id)
             .single()
           
@@ -137,7 +137,7 @@ export const useAuthStore = defineStore('auth', () => {
         // 사용자 역할 정보 가져오기
         const { data: userData, error: userError } = await supabase
           .from('users')
-          .select('id, email, role, facility_id')
+          .select('id, email, role, facility_id, company_id')
           .eq('id', data.user.id)
           .single()
 

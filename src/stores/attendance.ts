@@ -4,12 +4,12 @@ import { ref, computed } from 'vue'
 export interface Employee {
   id: string
   name: string
-  department: string
   position: string
   employeeNumber: string
   isActive: boolean,
   salary_type: 'hourly' | 'monthly'
   pay_period_end_type: 'string'
+  company_id: string
 }
 
 export interface AttendanceRecord {
@@ -40,6 +40,8 @@ export const useAttendanceStore = defineStore('attendance', () => {
   )
 
   const getEmployeeById = (id: string) => employees.value.find((emp) => emp.id === id)
+
+  const getEmployeeByCompanyId = (companyId: string) => employees.value.filter((emp) => emp.company_id === companyId)
 
   const getEmployeeRecord = (employeeId: string, date: string) =>
     attendanceRecords.value.find(
@@ -150,6 +152,7 @@ export const useAttendanceStore = defineStore('attendance', () => {
     activeEmployees,
     todayRecords,
     getEmployeeById,
+    getEmployeeByCompanyId,
     getEmployeeRecord,
 
     // Actions

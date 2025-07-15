@@ -1,14 +1,17 @@
 <script setup lang="ts">
 import { useSupabaseAttendanceStore } from '../stores/supabaseAttendance'
+import { useAuthStore } from '../stores/auth'
 import { ref, computed, onMounted, watch } from 'vue'
 import type { AttendanceRecord } from '../lib/supabase'
 import { useRoute } from 'vue-router'
 
 const store = useSupabaseAttendanceStore()
+const authStore = useAuthStore()
 const route = useRoute()
 
 // 선택된 직원
 const selectedEmployeeId = ref('')
+const selectedCompanyId = ref('')
 
 // 날짜 선택
 const getDefaultStartDate = () => {
@@ -115,6 +118,12 @@ onMounted(async () => {
     // 현재 연도의 공휴일 가져오기
     const currentYear = new Date().getFullYear()
     await fetchHolidays(currentYear)
+    
+    // staff 계정이고 company_id가 있으면 미리 설정
+    if (authStore.isStaff && authStore.user?.company_id) {
+      selectedCompanyId.value = authStore.user.company_id
+      console.log('Staff 계정의 company_id 설정:', authStore.user.company_id)
+    }
     
     // 쿼리 파라미터에서 직원 ID 확인
     const employeeIdFromQuery = route.query.employeeId as string
@@ -349,6 +358,9 @@ const workStats = computed(() => {
   let totalWorkDays = 0
   let nightShiftCount = 0 // 야근근무 횟수
 
+  // 선택된 회사 ID 확인
+  const isSpecialCompany = selectedCompanyId.value === 'f41d81fc-2472-495e-ac0d-19e836dc613b'
+
   records.forEach(record => {
     if (record.check_in && record.check_out) {
       const isHolidayWork = isHoliday(record.date)
@@ -377,58 +389,65 @@ const workStats = computed(() => {
       totalWorkDays++ // 근무일수 카운트 (출퇴근이 있는 경우만)
       
       if (isHolidayWork) {
-        // 야간근무가 아닌 경우 9:00~18:00 사이의 근무만 휴일출근시간으로 인정
-        if (!record.is_night_shift) {
-          let adjustedCheckIn = record.check_in
-          let adjustedCheckOut = record.check_out
-          
-          // 예상 출근시간이 있고, 실제 출근시간이 늦으면 30분 단위로 올림
-          if (record.scheduled_check_in) {
-            if (record.check_in > record.scheduled_check_in) {
-              // 실제 출근시간이 늦으면 30분 단위로 올림
-              adjustedCheckIn = roundUpToNearestHalfHour(record.check_in)
-            } else if (record.check_in < record.scheduled_check_in) {
-              // 실제 출근시간이 빠르면 예상시간으로 조정
-              adjustedCheckIn = record.scheduled_check_in
-            }
-          }
-          
-          // 예상 퇴근시간이 있고, 실제 퇴근시간이 늦으면 30분 단위로 내림
-          if (record.scheduled_check_out && record.check_out > record.scheduled_check_out) {
-            adjustedCheckOut = roundDownToNearestHalfHour(record.check_out)
-          }
-          
-          // 30분 단위로 반올림된 시간으로 계산
-          const checkInMinutes = getMinutesFromTime(adjustedCheckIn)
-          const checkOutMinutes = getMinutesFromTime(adjustedCheckOut)
-          
-          // 9:00 (540분) ~ 18:00 (1080분) 사이의 근무시간 계산
-          const workStartMinutes = Math.max(checkInMinutes, 540) // 9:00
-          const workEndMinutes = Math.min(checkOutMinutes, 1080) // 18:00
-          
-          if (workStartMinutes < workEndMinutes) {
-            const recognizedWorkMinutes = workEndMinutes - workStartMinutes
-            const recognizedWorkHours = recognizedWorkMinutes / 60
-            
-            // 휴일출근시간에서 휴게시간 제외
-            const adjustedHolidayHours = recognizedWorkHours - breakTimeHoursForRecord
-            
-            console.log('인정 근무시간:', recognizedWorkHours, '시간')
-            console.log('휴게시간:', breakTimeHoursForRecord, '시간')
-            console.log('조정된 휴일출근시간:', adjustedHolidayHours, '시간')
-            
-            holidayWorkHours += Math.max(0, adjustedHolidayHours) // 음수가 되지 않도록
-            
-            // 제외된 시간 계산 (전체 근무시간 - 인정된 근무시간)
-            const excludedHours = netWorkHours - Math.max(0, adjustedHolidayHours)
-            holidayExcludedHours += Math.max(0, excludedHours)
-          } else {
-            // 9:00~18:00 외 시간이므로 모두 제외
-            holidayExcludedHours += netWorkHours
-          }
+        // 특별한 회사의 경우 휴일출근시간 계산하지 않음
+        if (isSpecialCompany) {
+          // 휴일출근시간을 계산하지 않고 평일 근무시간에 포함
+          weekdayWorkHours += netWorkHours
         } else {
-          // 야간근무는 전체 시간에서 휴식시간 제외
-          holidayWorkHours += netWorkHours
+          // 기존 로직 (일반 회사)
+          // 야간근무가 아닌 경우 9:00~18:00 사이의 근무만 휴일출근시간으로 인정
+          if (!record.is_night_shift) {
+            let adjustedCheckIn = record.check_in
+            let adjustedCheckOut = record.check_out
+            
+            // 예상 출근시간이 있고, 실제 출근시간이 늦으면 30분 단위로 올림
+            if (record.scheduled_check_in) {
+              if (record.check_in > record.scheduled_check_in) {
+                // 실제 출근시간이 늦으면 30분 단위로 올림
+                adjustedCheckIn = roundUpToNearestHalfHour(record.check_in)
+              } else if (record.check_in < record.scheduled_check_in) {
+                // 실제 출근시간이 빠르면 예상시간으로 조정
+                adjustedCheckIn = record.scheduled_check_in
+              }
+            }
+            
+            // 예상 퇴근시간이 있고, 실제 퇴근시간이 늦으면 30분 단위로 내림
+            if (record.scheduled_check_out && record.check_out > record.scheduled_check_out) {
+              adjustedCheckOut = roundDownToNearestHalfHour(record.check_out)
+            }
+            
+            // 30분 단위로 반올림된 시간으로 계산
+            const checkInMinutes = getMinutesFromTime(adjustedCheckIn)
+            const checkOutMinutes = getMinutesFromTime(adjustedCheckOut)
+            
+            // 9:00 (540분) ~ 18:00 (1080분) 사이의 근무시간 계산
+            const workStartMinutes = Math.max(checkInMinutes, 540) // 9:00
+            const workEndMinutes = Math.min(checkOutMinutes, 1080) // 18:00
+            
+            if (workStartMinutes < workEndMinutes) {
+              const recognizedWorkMinutes = workEndMinutes - workStartMinutes
+              const recognizedWorkHours = recognizedWorkMinutes / 60
+              
+              // 휴일출근시간에서 휴게시간 제외
+              const adjustedHolidayHours = recognizedWorkHours - breakTimeHoursForRecord
+              
+              console.log('인정 근무시간:', recognizedWorkHours, '시간')
+              console.log('휴게시간:', breakTimeHoursForRecord, '시간')
+              console.log('조정된 휴일출근시간:', adjustedHolidayHours, '시간')
+              
+              holidayWorkHours += Math.max(0, adjustedHolidayHours) // 음수가 되지 않도록
+              
+              // 제외된 시간 계산 (전체 근무시간 - 인정된 근무시간)
+              const excludedHours = netWorkHours - Math.max(0, adjustedHolidayHours)
+              holidayExcludedHours += Math.max(0, excludedHours)
+            } else {
+              // 9:00~18:00 외 시간이므로 모두 제외
+              holidayExcludedHours += netWorkHours
+            }
+          } else {
+            // 야간근무는 전체 시간에서 휴식시간 제외
+            holidayWorkHours += netWorkHours
+          }
         }
       } else {
         // 평일 근무시간 (휴일이 아닌 경우)
@@ -456,7 +475,8 @@ const workStats = computed(() => {
     lateShiftHours: Math.round(lateShiftHours * 100) / 100,
     dayShiftHours: Math.round(dayShiftHours * 100) / 100,
     totalDays: totalWorkDays,
-    nightShiftCount // 야근근무 횟수 추가
+    nightShiftCount, // 야근근무 횟수 추가
+    isSpecialCompany // 특별한 회사 여부 추가
   }
 })
 
@@ -464,6 +484,10 @@ const workStats = computed(() => {
 const calculateShiftHours = (checkInTime: string | null, checkOutTime: string | null, breakTime: string | null, isHoliday: boolean = false, scheduledCheckIn: string | null = null, scheduledCheckOut: string | null = null) => {
   if (!checkInTime || !checkOutTime) return { early: 0, late: 0, day: 0 }
   
+  // 선택된 회사 ID 확인
+  const selectedCompany = store.companies.find(company => company.id === selectedCompanyId.value)
+  const isSpecialCompany = selectedCompany?.id === 'f41d81fc-2472-495e-ac0d-19e836dc613b'
+
   let adjustedCheckIn = checkInTime
   let adjustedCheckOut = checkOutTime
   
@@ -495,6 +519,40 @@ const calculateShiftHours = (checkInTime: string | null, checkOutTime: string | 
     return { early: 0, late: 0, day: 0 }
   }
   
+  // 특별한 회사의 경우 모든 시간을 日勤으로 처리
+  if (isSpecialCompany) {
+    // 퇴근시간이 출근시간보다 작으면 다음날로 간주 (야간근무)
+    let workEndMinutes = checkOutMinutes
+    if (workEndMinutes <= checkInMinutes) {
+      workEndMinutes += 24 * 60 // 24시간 추가
+    }
+    
+    // 휴식시간 계산 (분 단위)
+    const getBreakTimeMinutes = (breakTimeStr: string | null) => {
+      if (!breakTimeStr) return 0
+      const [hours, minutes] = breakTimeStr.split(':').map(Number)
+      return hours * 60 + minutes
+    }
+    
+    const breakTimeMinutes = getBreakTimeMinutes(breakTime)
+    
+    // 전체 근무시간을 日勤으로 계산
+    const totalWorkMinutes = workEndMinutes - checkInMinutes
+    let dayShiftMinutes = totalWorkMinutes - breakTimeMinutes
+    
+    // 휴일에 8시간 이상 근무한 경우 8시간으로 고정
+    if (isHoliday && dayShiftMinutes >= 8 * 60) {
+      dayShiftMinutes = 8 * 60
+    }
+    
+    return {
+      early: 0,
+      late: 0,
+      day: Math.max(0, dayShiftMinutes / 60)
+    }
+  }
+  
+  // 기존 로직 (일반 회사)
   // 퇴근시간이 출근시간보다 작으면 다음날로 간주 (야간근무)
   
   let workEndMinutes = checkOutMinutes
@@ -705,6 +763,13 @@ watch(selectedEmployeeId, () => {
   startDate.value = getDefaultStartDate()
   endDate.value = getDefaultEndDate()
 })
+
+// 회사 선택이 변경될 때 직원 선택 초기화
+watch(selectedCompanyId, () => {
+  selectedEmployeeId.value = ''
+  startDate.value = getDefaultStartDate()
+  endDate.value = getDefaultEndDate()
+})
 </script>
 
 <template>
@@ -727,15 +792,35 @@ watch(selectedEmployeeId, () => {
     <div v-if="store.error" class="error-message">
       {{ store.error }}
     </div>
-
+    
     <!-- 직원 선택 및 기간 설정 -->
     <div class="control-section">
+      <div class="company-selector">
+        <label for="company-select">会社選択:</label>
+        <select 
+          id="company-select" 
+          v-model="selectedCompanyId"
+          class="company-select"
+          :disabled="authStore.isStaff && authStore.user?.company_id"
+        >
+          <option value="">会社を選択してください</option>
+          <option 
+            v-for="company in store.companies" 
+            :key="company.id" 
+            :value="company.id"
+          >
+            {{ company.name }}
+          </option>
+        </select>
+      </div>
+
       <div class="employee-selector">
         <label for="employee-select">従業員選択:</label>
         <select 
           id="employee-select" 
           v-model="selectedEmployeeId"
           class="employee-select"
+          :disabled="!selectedCompanyId"
         >
           <option value="">従業員を選択してください</option>
           <option 
@@ -743,7 +828,7 @@ watch(selectedEmployeeId, () => {
             :key="employee.id" 
             :value="employee.id"
           >
-            {{ employee.employee_code }} - {{ employee.last_name }}{{ employee.first_name }} ({{ employee.department }})
+            {{ employee.employee_code }} - {{ employee.last_name }}{{ employee.first_name }} ({{ employee.facility_id ? store.getFacilityName(employee.facility_id) : '-' }})
           </option>
         </select>
       </div>
@@ -784,7 +869,7 @@ watch(selectedEmployeeId, () => {
         </div>
         <div class="detail-item">
           <span class="label">部署:</span>
-          <span class="value">{{ selectedEmployee.department }}</span>
+          <span class="value">{{ selectedEmployee.facility_id ? store.getFacilityName(selectedEmployee.facility_id) : '-' }}</span>
         </div>
         <div class="detail-item">
           <span class="label">職種:</span>
@@ -826,7 +911,7 @@ watch(selectedEmployeeId, () => {
       </div>
       
       <!-- 근무 유형별 통계 -->
-      <div class="shift-stats">
+      <div class="shift-stats" v-if="!workStats.isSpecialCompany">
         <h3>勤務区分別統計</h3>
         <div class="stats-grid">
           <div class="stat-card shift-card">
@@ -871,6 +956,29 @@ watch(selectedEmployeeId, () => {
           </div>
         </div>
       </div>
+
+      <!-- 특별한 회사의 경우 간단한 통계 -->
+      <div class="shift-stats" v-if="workStats.isSpecialCompany">
+        <h3>勤務区分別統計</h3>
+        <div class="stats-grid">
+          <div class="stat-card shift-card">
+            <div class="stat-icon">☀️</div>
+            <div class="stat-content">
+              <div class="stat-number">{{ workStats.dayShiftHours }}時間</div>
+              <div class="stat-label">日勤勤務時間</div>
+              <div class="stat-subtitle">全勤務時間</div>
+            </div>
+          </div>
+          <div class="stat-card shift-card">
+            <div class="stat-icon">🌙</div>
+            <div class="stat-content">
+              <div class="stat-number">{{ workStats.nightShiftCount }} / {{ workStats.nightShiftCount * 14 }}時間</div>
+              <div class="stat-label">夜勤勤務回数 / 時間</div>
+              <div class="stat-subtitle">16:30～翌日09:30</div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- 상세 근무 기록 -->
@@ -889,8 +997,8 @@ watch(selectedEmployeeId, () => {
               <th>休憩時間</th>
               <th>出勤時間</th>
               <th>退勤時間</th>
-              <th>早出</th>
-              <th>遅出</th>
+              <th v-if="!workStats.isSpecialCompany">早出</th>
+              <th v-if="!workStats.isSpecialCompany">遅出</th>
               <th>日勤</th>
               <th>勤務時間</th>
               <th>状態</th>
@@ -913,10 +1021,10 @@ watch(selectedEmployeeId, () => {
                   {{ formatTime(record.check_out) }}
                 </span>
               </td>
-              <td>
+              <td v-if="!workStats.isSpecialCompany">
                 {{ (() => { const hours = calculateShiftHours(record.check_in, record.check_out, record.break_time, isHoliday(record.date), record.scheduled_check_in, record.scheduled_check_out); return hours.early > 0 ? `${hours.early.toFixed(1)}時間` : '-'; })() }}
               </td>
-              <td>
+              <td v-if="!workStats.isSpecialCompany">
                 {{ (() => { const hours = calculateShiftHours(record.check_in, record.check_out, record.break_time, isHoliday(record.date), record.scheduled_check_in, record.scheduled_check_out); return hours.late > 0 ? `${hours.late.toFixed(1)}時間` : '-'; })() }}
               </td>
               <td>
@@ -1024,6 +1132,45 @@ watch(selectedEmployeeId, () => {
   gap: 3rem;
   flex-wrap: wrap;
   align-items: flex-end;
+}
+
+.company-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 400px;
+}
+
+.company-selector label {
+  font-weight: 600;
+  color: #2c3e50;
+  font-size: 1.2rem;
+}
+
+.company-select {
+  padding: 1rem;
+  border: 3px solid #e0e0e0;
+  border-radius: 12px;
+  font-size: 1.2rem;
+  background: white;
+  transition: border-color 0.3s ease;
+}
+
+.company-select:focus {
+  outline: none;
+  border-color: #667eea;
+}
+
+.company-select:disabled {
+  background-color: #f8f9fa;
+  color: #6c757d;
+  cursor: not-allowed;
+}
+
+.staff-notice {
+  margin-top: 0.5rem;
+  color: #6c757d;
+  font-style: italic;
 }
 
 .employee-selector {

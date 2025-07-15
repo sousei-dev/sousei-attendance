@@ -20,7 +20,6 @@ export interface Employee {
   id: string
   last_name: string
   first_name: string
-  department: string
   first_name_kana: string
   last_name_kana: string
   gender: string
@@ -33,12 +32,12 @@ export interface Employee {
   salary_type: 'hourly' | 'monthly'
   pay_period_end_type: string
   facility_id?: string
+  company_id?: string
 }
 
 export interface AttendanceRecord {
   id: string
   employee_id: string
-  department: string
   date: string
   check_in: string | null
   check_out: string | null
@@ -64,11 +63,19 @@ export interface AuthUser {
   email: string
   role: string
   facility_id?: string
+  company_id?: string
 }
 
 export interface Facility {
   id: string
   name: string
+}
+
+export interface Company {
+  id: string
+  name: string
+  created_at: string
+  note: string
 }
 
 export interface Database {

@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { useAttendanceStore } from '../stores/attendance'
+import { useSupabaseAttendanceStore } from '../stores/supabaseAttendance'
 import { ref, computed } from 'vue'
+import type { Employee } from '../lib/supabase'
 
-const store = useAttendanceStore()
+const store = useSupabaseAttendanceStore()
 
 const selectedYear = ref(new Date().getFullYear())
 const selectedMonth = ref(new Date().getMonth() + 1)
@@ -17,9 +18,18 @@ const monthlyStats = computed(() => {
   const totalEmployees = store.activeEmployees.length
   const totalWorkDays = totalDays * totalEmployees
 
-  const presentDays = records.filter((r) => r.checkIn).length
+  const presentDays = records.filter((r) => r.check_in).length
   const absentDays = totalWorkDays - presentDays
-  const totalHours = records.reduce((sum, r) => sum + (r.totalHours || 0), 0)
+  const totalHours = records.reduce((sum, r) => {
+    if (r.check_in && r.check_out) {
+      const checkIn = new Date(`2000-01-01T${r.check_in}`)
+      const checkOut = new Date(`2000-01-01T${r.check_out}`)
+      const diffMs = checkOut.getTime() - checkIn.getTime()
+      const diffHours = diffMs / (1000 * 60 * 60)
+      return sum + diffHours
+    }
+    return sum
+  }, 0)
   const avgHours = presentDays > 0 ? totalHours / presentDays : 0
 
   return {
@@ -35,12 +45,27 @@ const monthlyStats = computed(() => {
 })
 
 const employeeStats = computed(() => {
-  const stats: Record<string, any> = {}
+  const stats: Record<string, {
+    employee: Employee
+    presentDays: number
+    totalHours: number
+    avgHours: number
+    attendanceRate: number
+  }> = {}
 
   store.activeEmployees.forEach((employee) => {
-    const employeeRecords = monthlyRecords.value.filter((r) => r.employeeId === employee.id)
-    const presentDays = employeeRecords.filter((r) => r.checkIn).length
-    const totalHours = employeeRecords.reduce((sum, r) => sum + (r.totalHours || 0), 0)
+    const employeeRecords = monthlyRecords.value.filter((r) => r.employee_id === employee.id)
+    const presentDays = employeeRecords.filter((r) => r.check_in).length
+    const totalHours = employeeRecords.reduce((sum, r) => {
+      if (r.check_in && r.check_out) {
+        const checkIn = new Date(`2000-01-01T${r.check_in}`)
+        const checkOut = new Date(`2000-01-01T${r.check_out}`)
+        const diffMs = checkOut.getTime() - checkIn.getTime()
+        const diffHours = diffMs / (1000 * 60 * 60)
+        return sum + diffHours
+      }
+      return sum
+    }, 0)
     const avgHours = presentDays > 0 ? totalHours / presentDays : 0
 
     stats[employee.id] = {
@@ -155,8 +180,8 @@ const formatDate = (dateString: string) => {
           </thead>
           <tbody>
             <tr v-for="(stats, employeeId) in employeeStats" :key="employeeId">
-              <td>{{ stats.employee.name }}</td>
-              <td>{{ stats.employee.department }}</td>
+              <td>{{ stats.employee.last_name }}{{ stats.employee.first_name }}</td>
+              <td>{{ stats.employee.facility_id ? store.getFacilityName(stats.employee.facility_id) : '-' }}</td>
               <td>{{ stats.presentDays }}일</td>
               <td>{{ stats.totalHours }}시간</td>
               <td>{{ stats.avgHours }}시간</td>
@@ -184,7 +209,7 @@ const formatDate = (dateString: string) => {
         <div v-for="record in monthlyRecords" :key="record.id" class="record-item">
           <div class="record-header">
             <div class="record-date">{{ formatDate(record.date) }}</div>
-            <div class="employee-name">{{ store.getEmployeeById(record.employeeId)?.name }}</div>
+            <div class="employee-name">{{ store.getEmployeeById(record.employee_id)?.last_name }}{{ store.getEmployeeById(record.employee_id)?.first_name }}</div>
             <div class="record-status" :class="record.status">
               {{
                 record.status === 'present'
@@ -200,11 +225,8 @@ const formatDate = (dateString: string) => {
 
           <div class="record-details">
             <div class="time-info">
-              <span v-if="record.checkIn" class="check-in"> 출근: {{ record.checkIn }} </span>
-              <span v-if="record.checkOut" class="check-out"> 퇴근: {{ record.checkOut }} </span>
-              <span v-if="record.totalHours" class="total-hours">
-                근무시간: {{ record.totalHours }}시간
-              </span>
+              <span v-if="record.check_in" class="check-in"> 출근: {{ record.check_in }} </span>
+              <span v-if="record.check_out" class="check-out"> 퇴근: {{ record.check_out }} </span>
             </div>
           </div>
         </div>
