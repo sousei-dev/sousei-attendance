@@ -89,10 +89,18 @@ onUnmounted(() => {
 })
 
 const todayStats = computed(() => {
-  const records = store.todayRecords
   const totalEmployees = store.activeEmployees.length
-  const checkedIn = records.filter((r) => r.check_in).length
-  const checkedOut = records.filter((r) => r.check_out).length
+  let checkedIn = 0
+  let checkedOut = 0
+
+  // activeEmployees를 기준으로 출근/퇴근 상태 계산
+  store.activeEmployees.forEach(employee => {
+    const record = employeeRecords.value[employee.id]
+    if (record) {
+      if (record.check_in) checkedIn++
+      if (record.check_out) checkedOut++
+    }
+  })
 
   return {
     total: totalEmployees,
