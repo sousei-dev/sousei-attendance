@@ -285,21 +285,36 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
         throw new Error('既に出勤処理されています。')
       }
 
-      // 야간 근무 여부 확인 (16:30 이후 출근은 야간 근무)
-      const currentMinutes = now.getHours() * 60 + now.getMinutes()
-      const isNightShift = currentMinutes >= 16 * 60 + 30 || currentMinutes < 6 * 60 // 16:30 이후 또는 06:00 이전
+      // 야간 근무 여부 확인 (예상 출근시간 기준)
+      let isNightShift = false
       
-      // 야간 근무의 경우 실제 근무 날짜 계산
-      let actualWorkDate = currentDate.value
-      if (isNightShift && currentHour >= 16) {
-        // 16:30 이후 출근은 다음날까지 근무
-        const tomorrow = new Date(now)
-        tomorrow.setDate(tomorrow.getDate() + 1)
-        const year = tomorrow.getFullYear()
-        const month = String(tomorrow.getMonth() + 1).padStart(2, '0')
-        const day = String(tomorrow.getDate()).padStart(2, '0')
-        actualWorkDate = `${year}-${month}-${day}`
+      if (scheduledCheckIn) {
+        // 시간 문자열에서 시간과 분을 직접 추출
+        const timeParts = scheduledCheckIn.split(':')
+        const hours = parseInt(timeParts[0], 10)
+        const minutes = parseInt(timeParts[1], 10)
+        const scheduledMinutes = hours * 60 + minutes
+        
+        console.log('=== 야간 근무 디버깅 ===')
+        console.log('scheduledCheckIn:', scheduledCheckIn)
+        console.log('scheduledMinutes:', scheduledMinutes)
+        console.log('16:30 분:', 16 * 60 + 30)
+        console.log('09:30분:', 9 * 60 + 30)
+        console.log('조건1 (>= 16:30, scheduledMinutes >= 16 * 60 + 30):', scheduledMinutes >= 16 * 60 + 30)
+        console.log('조건2 (<= 09:30, scheduledMinutes <= 9 * 60 + 30):', scheduledMinutes <= 9 * 60 + 30)
+        
+        // 야간 근무 판단: 16:30 이후 출근 또는 09:30 이전 출근
+        isNightShift = scheduledMinutes >= 16 * 60 + 30 || scheduledMinutes <= 9 * 60 + 30
+        console.log('isNightShift:', isNightShift)
+        console.log('=== 야간 근무 디버깅 끝 ===')
+      } else {
+        // 예상 출근시간이 없으면 실제 출근시간 기준
+        const currentMinutes = now.getHours() * 60 + now.getMinutes()
+        isNightShift = currentMinutes >= 16 * 60 || currentMinutes < 6 * 60 //16:30또는 6
       }
+
+      // 주간/야간 관계없이 오늘 날짜로 설정
+      const actualWorkDate = currentDate.value
 
       // 출근 시간 기준으로 상태 결정
       let status: 'present' | 'late' = 'present'
