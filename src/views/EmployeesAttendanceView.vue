@@ -639,7 +639,7 @@ const calculateShiftHours = (checkInTime: string | null, checkOutTime: string | 
   }
 }
 
-// 야근근무 여부 확인 (16:30 ~ 다음날 09:30)
+// 야근근무 여부 확인 (예상 출근시간이 16:30이고 예상 퇴근시간이 09:30인 경우)
 const isNightShiftWork = (checkInTime: string | null, checkOutTime: string | null, scheduledCheckIn: string | null = null, scheduledCheckOut: string | null = null) => {
   if (!checkInTime || !checkOutTime) return false
   
@@ -651,17 +651,12 @@ const isNightShiftWork = (checkInTime: string | null, checkOutTime: string | nul
   const checkInMinutes = getMinutesFromTime(baseCheckIn)
   const checkOutMinutes = getMinutesFromTime(baseCheckOut)
   
-  // 16:30 = 990분, 09:30 = 570분
-  const nightShiftStart = 990 // 16:30
-  const nightShiftEnd = 570   // 09:30
+  // 09:30 = 570분, 16:30 = 990분
+  const nineThirtyMinutes = 570   // 09:30
+  const sixteenThirtyMinutes = 990 // 16:30
   
-  // 퇴근시간이 출근시간보다 작으면 다음날로 간주
-  if (checkOutMinutes <= checkInMinutes) {
-    // 야근근무 조건: 출근시간이 16:30 이후이고, 퇴근시간이 다음날 09:30 이전
-    return checkInMinutes >= nightShiftStart && checkOutMinutes <= nightShiftEnd
-  }
-  
-  return false
+  // 야간 근무 조건: 출근시간이 16:30이고 퇴근시간이 09:30인 경우
+  return checkInMinutes === sixteenThirtyMinutes && checkOutMinutes === nineThirtyMinutes
 }
 
 // 날짜 형식 변환

@@ -303,8 +303,22 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
         console.log('조건1 (>= 16:30, scheduledMinutes >= 16 * 60 + 30):', scheduledMinutes >= 16 * 60 + 30)
         console.log('조건2 (<= 09:30, scheduledMinutes <= 9 * 60 + 30):', scheduledMinutes <= 9 * 60 + 30)
         
-        // 야간 근무 판단: 16:30 이후 출근 또는 09:30 이전 출근
-        isNightShift = scheduledMinutes >= 16 * 60 + 30 || scheduledMinutes <= 9 * 60 + 30
+        // 야간 근무 판단: 예상 출근시간이 16:30이고 예상 퇴근시간이 09:30인 경우
+        const nineThirtyMinutes = 9 * 60 + 30  // 09:30
+        const sixteenThirtyMinutes = 16 * 60 + 30  // 16:30
+        
+        if (scheduledCheckOut) {
+          const checkOutParts = scheduledCheckOut.split(':')
+          const checkOutHours = parseInt(checkOutParts[0], 10)
+          const checkOutMinutes = parseInt(checkOutParts[1], 10)
+          const scheduledCheckOutMinutes = checkOutHours * 60 + checkOutMinutes
+          
+          // 야간 근무 조건: 출근시간이 16:30이고 퇴근시간이 09:30인 경우
+          isNightShift = scheduledMinutes === sixteenThirtyMinutes && scheduledCheckOutMinutes === nineThirtyMinutes
+        } else {
+          // 퇴근시간이 없으면 출근시간만으로 판단
+          isNightShift = scheduledMinutes === sixteenThirtyMinutes
+        }
         console.log('isNightShift:', isNightShift)
         console.log('=== 야간 근무 디버깅 끝 ===')
       } else {
