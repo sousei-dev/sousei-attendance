@@ -15,13 +15,13 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
   // auth store 가져오기
   const authStore = useAuthStore()
 
-  // 현재 날짜 (로컬 시간 기준)
+  // 현재 날짜 (UTC 시간 기준)
   const currentDate = computed(() => {
     const now = new Date()
-    const year = now.getFullYear()
-    const month = String(now.getMonth() + 1).padStart(2, '0')
-    const day = String(now.getDate()).padStart(2, '0')
-    return `${year}-${month}-${day}`
+    const utcYear = now.getUTCFullYear()
+    const utcMonth = String(now.getUTCMonth() + 1).padStart(2, '0')
+    const utcDay = String(now.getUTCDate()).padStart(2, '0')
+    return `${utcYear}-${utcMonth}-${utcDay}`
   })
 
   // 활성 직원들 (role과 facility_id에 따라 필터링)
@@ -45,7 +45,7 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
   // 오늘의 출퇴근 기록 (야간 근무 고려)
   const todayRecords = computed(() => {
     const now = new Date()
-    const currentHour = now.getHours()
+    const currentHour = now.getUTCHours()
     
     let targetDate = currentDate.value
     
@@ -216,7 +216,7 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
     try {
       const now = new Date()
       const checkInTime = now.toTimeString().slice(0, 8) // HH:MM:SS 형식
-      const currentHour = now.getHours()
+      const currentHour = now.getUTCHours()
 
       // 현재 시간에 따라 적절한 날짜 설정
       let targetDate = currentDate.value
@@ -327,8 +327,14 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
         isNightShift = currentMinutes >= 16 * 60 || currentMinutes < 6 * 60 //16:30또는 6
       }
 
-      // 주간/야간 관계없이 오늘 날짜로 설정
-      const actualWorkDate = currentDate.value
+      // 출근 시점의 정확한 날짜 사용 (UTC 기준)
+      const actualWorkDate = now.toISOString().split('T')[0]
+      
+      console.log('=== 출근 날짜 디버깅 ===')
+      console.log('현재 시간:', now)
+      console.log('currentDate.value:', currentDate.value)
+      console.log('actualWorkDate:', actualWorkDate)
+      console.log('=== 출근 날짜 디버깅 끝 ===')
 
       // 출근 시간 기준으로 상태 결정
       let status: 'present' | 'late' = 'present'
@@ -353,7 +359,7 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
         .from('attendance_records')
         .insert({
           employee_id: employeeId,
-          date: actualWorkDate, // 실제 근무 날짜 사용
+          date: currentDate.value, // 실제 근무 날짜 사용
           check_in: checkInTime,
           check_out: null,
           status,
@@ -456,7 +462,7 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
         // 야간 근무의 경우 조퇴 판단 기준 조정
         if (record.is_night_shift) {
           // 야간 근무: 06시 이전 퇴근 시 조퇴
-          const isEarlyLeave = now.getHours() < 6
+          const isEarlyLeave = now.getUTCHours() < 6
           if (isEarlyLeave && status === 'present') {
             status = 'early-leave'
           }
@@ -470,13 +476,13 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
         // 기본값: 야간/주간 근무에 따른 조퇴 판단
         if (record.is_night_shift) {
           // 야간 근무: 06시 이전 퇴근
-          const isEarlyLeave = now.getHours() < 6
+          const isEarlyLeave = now.getUTCHours() < 6
           if (isEarlyLeave && status === 'present') {
             status = 'early-leave'
           }
         } else {
           // 주간 근무: 18시 이전 퇴근
-          const isEarlyLeave = now.getHours() < 18
+          const isEarlyLeave = now.getUTCHours() < 18
           if (isEarlyLeave && status === 'present') {
             status = 'early-leave'
           }
