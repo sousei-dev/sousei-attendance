@@ -13,6 +13,28 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     persistSession: true,
     detectSessionInUrl: true,
   },
+  global: {
+    headers: {
+      'X-Client-Info': 'sousei-attendance',
+    },
+  },
+})
+
+// Supabase 전역 에러 핸들러 추가
+supabase.auth.onAuthStateChange((event, session) => {
+  console.log('Auth state change:', event, session?.user?.email)
+  
+  if (event === 'SIGNED_OUT') {
+    console.log('로그아웃 감지 - 로그인 페이지로 이동')
+    // 로그아웃 시 로그인 페이지로 리다이렉트
+    if (window.location.pathname !== '/login') {
+      window.location.href = '/login'
+    }
+  }
+  
+  if (event === 'TOKEN_REFRESHED') {
+    console.log('토큰 갱신 완료')
+  }
 })
 
 // 데이터베이스 타입 정의
