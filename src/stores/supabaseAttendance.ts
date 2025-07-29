@@ -12,15 +12,17 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
   const loading = ref(false)
   const error = ref<string | null>(null)
 
+
+
   // auth store 가져오기
   const authStore = useAuthStore()
 
-  // 현재 날짜 (UTC 시간 기준)
+  // 현재 날짜
   const currentDate = computed(() => {
     const now = new Date()
-    const utcYear = now.getUTCFullYear()
-    const utcMonth = String(now.getUTCMonth() + 1).padStart(2, '0')
-    const utcDay = String(now.getUTCDate()).padStart(2, '0')
+    const utcYear = now.getFullYear()
+    const utcMonth = String(now.getMonth() + 1).padStart(2, '0')
+    const utcDay = String(now.getDate()).padStart(2, '0')
     return `${utcYear}-${utcMonth}-${utcDay}`
   })
 
@@ -45,7 +47,7 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
   // 오늘의 출퇴근 기록 (야간 근무 고려)
   const todayRecords = computed(() => {
     const now = new Date()
-    const currentHour = now.getUTCHours()
+    const currentHour = now.getHours()
     
     let targetDate = currentDate.value
     
@@ -216,7 +218,7 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
     try {
       const now = new Date()
       const checkInTime = now.toTimeString().slice(0, 8) // HH:MM:SS 형식
-      const currentHour = now.getUTCHours()
+      const currentHour = now.getHours()
 
       // 현재 시간에 따라 적절한 날짜 설정
       let targetDate = currentDate.value
@@ -371,7 +373,9 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
         .select()
         .single()
 
-      if (supabaseError) throw supabaseError
+      if (supabaseError) {
+        throw supabaseError
+      }
 
       // 로컬 상태 업데이트
       attendanceRecords.value.push(data)
@@ -462,7 +466,7 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
         // 야간 근무의 경우 조퇴 판단 기준 조정
         if (record.is_night_shift) {
           // 야간 근무: 06시 이전 퇴근 시 조퇴
-          const isEarlyLeave = now.getUTCHours() < 6
+          const isEarlyLeave = now.getHours() < 6
           if (isEarlyLeave && status === 'present') {
             status = 'early-leave'
           }
@@ -476,13 +480,13 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
         // 기본값: 야간/주간 근무에 따른 조퇴 판단
         if (record.is_night_shift) {
           // 야간 근무: 06시 이전 퇴근
-          const isEarlyLeave = now.getUTCHours() < 6
+          const isEarlyLeave = now.getHours() < 6
           if (isEarlyLeave && status === 'present') {
             status = 'early-leave'
           }
         } else {
           // 주간 근무: 18시 이전 퇴근
-          const isEarlyLeave = now.getUTCHours() < 18
+          const isEarlyLeave = now.getHours() < 18
           if (isEarlyLeave && status === 'present') {
             status = 'early-leave'
           }
@@ -499,7 +503,9 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
         .select()
         .single()
 
-      if (supabaseError) throw supabaseError
+      if (supabaseError) {
+        throw supabaseError
+      }
 
       // 로컬 상태 업데이트
       const index = attendanceRecords.value.findIndex((r) => r.id === record.id)
@@ -527,7 +533,9 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
         .select()
         .single()
 
-      if (supabaseError) throw supabaseError
+      if (supabaseError) {
+        throw supabaseError
+      }
 
       employees.value.push(data)
       return data
@@ -556,7 +564,9 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
         .select()
         .single()
 
-      if (supabaseError) throw supabaseError
+      if (supabaseError) {
+        throw supabaseError
+      }
 
       const index = employees.value.findIndex((emp) => emp.id === id)
       if (index !== -1) {
@@ -585,7 +595,10 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
         .select()
         .single()
 
-      if (supabaseError) throw supabaseError
+      if (supabaseError) {
+
+        throw supabaseError
+      }
 
       const index = employees.value.findIndex((emp) => emp.id === id)
       if (index !== -1) {
@@ -625,7 +638,18 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
         .select('*')
         .order('id')
 
-      if (supabaseError) throw supabaseError
+      if (supabaseError) {
+        console.log('Supabase 에러 발생:', supabaseError)
+        // 인증 관련 에러인 경우 로그인 페이지로 리다이렉트
+        if (supabaseError.code === 'PGRST301' || 
+            supabaseError.message?.includes('JWT') || 
+            supabaseError.message?.includes('authentication')) {
+          console.error('인증 만료 감지 - 로그인 페이지로 이동')
+          window.location.href = '/login'
+          return
+        }
+        throw supabaseError
+      }
 
       facilities.value = data || []
     } catch (err) {
