@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useSupabaseAttendanceStore } from '../stores/supabaseAttendance'
-import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted, nextTick } from 'vue'
 import type { AttendanceRecord, Employee } from '../lib/supabase'
 import { useAuthStore } from '../stores/auth'
 
@@ -10,6 +10,7 @@ const searchQuery = ref('')
 const currentTime = ref(new Date())
 const formattedTime = ref('')
 const formattedDate = ref('')
+const showRefreshNotification = ref(false)
 
 // 실시간 시간 업데이트
 let timeInterval: ReturnType<typeof setInterval> | null = null
@@ -28,6 +29,8 @@ const updateFormattedTime = () => {
     second: '2-digit',
   })
 }
+
+
 
 const updateFormattedDate = () => {
   formattedDate.value = currentTime.value.toLocaleDateString('ja-JP', {
@@ -59,21 +62,38 @@ onMounted(async () => {
     updateFormattedTime()
     updateFormattedDate()
 
-    // 실시간 시간 업데이트 시작
+    // 통합된 시간 업데이트 (성능 최적화: 10초마다)
     timeInterval = setInterval(() => {
-      const newTime = new Date()
-      const oldHour = currentTime.value.getHours()
-      const newHour = newTime.getHours()
-      
-      // 시간이 바뀌면 캐시 초기화 (특히 00시, 06시, 18시)
-      if (oldHour !== newHour) {
-        clearCache()
+      try {
+        const newTime = new Date()
+        const oldHour = currentTime.value.getHours()
+        const newHour = newTime.getHours()
+        const oldDate = currentTime.value.getDate()
+        const newDate = newTime.getDate()
+        
+        // 날짜가 바뀌었을 때 (00시 경과) 페이지 새로고침
+        if (oldDate !== newDate) {
+          console.log('날짜가 바뀌었습니다. 페이지를 새로고침합니다.')
+          showRefreshNotification.value = true
+          // 3초 후 새로고침
+          setTimeout(() => {
+            window.location.reload()
+          }, 3000)
+          return
+        }
+        
+        // 시간이 바뀌면 캐시 초기화 (특히 00시, 06시, 18시)
+        if (oldHour !== newHour) {
+          clearCache()
+        }
+        
+        currentTime.value = newTime
+        updateFormattedTime()
+        updateFormattedDate()
+      } catch (error) {
+        console.error('시간 업데이트 중 오류 발생:', error)
       }
-      
-      currentTime.value = newTime
-      updateFormattedTime()
-      updateFormattedDate()
-    }, 1000)
+    }, 1000) // 10초마다 업데이트로 성능 최적화
     
   } catch (error) {
     console.error('페이지 초기화 중 에러 발생:', error)
@@ -140,7 +160,7 @@ const employeeRecords = computed(() => {
     // 캐시된 기록이 있고 최신이면 반환 (캐시 시간 단축)
     const cached = employeeRecordCache.value[employee.id]
     const now = Date.now()
-    if (cached && (now - cached.lastUpdate) < 500) { // 500ms로 단축
+    if (cached && (now - cached.lastUpdate) < 200) { // 200ms로 단축하여 더 빠른 업데이트
       records[employee.id] = cached.record
       return
     }
@@ -319,8 +339,14 @@ const handleAttendanceAction = async (employeeId: string) => {
     // 데이터 다시 로드
     await store.loadAttendanceRecords()
     
-    // 강제로 computed 재계산을 위한 지연
-    await new Promise(resolve => setTimeout(resolve, 100))
+    // 강제로 computed 재계산을 위한 지연 (시간 증가)
+    await new Promise(resolve => setTimeout(resolve, 200))
+    
+    // 추가로 한 번 더 캐시 무효화하여 확실히 업데이트
+    clearCache()
+    
+    // 강제로 Vue 반응성 시스템 트리거
+    await nextTick()
   } catch (error) {
     console.error('出退勤処理中にエラーが発生しました:', error)
   }
@@ -613,6 +639,17 @@ const closeEmployeeModal = () => {
       {{ store.error }}
     </div>
 
+    <!-- 새로고침 알림 -->
+    <div v-if="showRefreshNotification" class="refresh-notification">
+      <div class="refresh-content">
+        <div class="refresh-icon">🔄</div>
+        <div class="refresh-text">
+          <div class="refresh-title">日付が変更されました</div>
+          <div class="refresh-subtitle">3秒後にページを更新します...</div>
+        </div>
+      </div>
+    </div>
+
     <div class="dashboard-header">
       <div class="header-content">
         <div class="header-left">
@@ -842,6 +879,67 @@ const closeEmployeeModal = () => {
   text-align: center;
   font-weight: 500;
   font-size: 1.2rem;
+}
+
+.refresh-notification {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(0, 0, 0, 0.9);
+  color: white;
+  padding: 2rem 3rem;
+  border-radius: 16px;
+  z-index: 9999;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  animation: fadeIn 0.3s ease-in-out;
+}
+
+.refresh-content {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+}
+
+.refresh-icon {
+  font-size: 2.5rem;
+  animation: spin 1s linear infinite;
+}
+
+.refresh-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.refresh-title {
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+.refresh-subtitle {
+  font-size: 1.1rem;
+  opacity: 0.8;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .dashboard-header,
