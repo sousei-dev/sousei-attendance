@@ -38,6 +38,7 @@ onMounted(async () => {
         <nav class="main-nav">
           <RouterLink to="/" class="nav-link">ホーム</RouterLink>
           <RouterLink to="/employeesAttendanceView" class="nav-link">従業員勤務記録表</RouterLink>
+          <RouterLink v-if="authStore.isAdmin" to="/approval" class="nav-link admin-nav-link">承認管理</RouterLink>
           <!-- <RouterLink to="/employees" class="nav-link">従業員管理</RouterLink>
           <RouterLink to="/reports" class="nav-link">勤務レポート</RouterLink> -->
         </nav>
@@ -128,6 +129,19 @@ onMounted(async () => {
 .nav-link.router-link-active {
   background-color: #667eea;
   color: white;
+}
+
+.admin-nav-link {
+  background-color: #e74c3c;
+  color: white;
+}
+
+.admin-nav-link:hover {
+  background-color: #c0392b;
+}
+
+.admin-nav-link.router-link-active {
+  background-color: #c0392b;
 }
 
 .user-section {

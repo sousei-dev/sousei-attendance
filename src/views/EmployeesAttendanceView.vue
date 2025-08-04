@@ -25,12 +25,9 @@ const getDefaultStartDate = (employee?: { pay_period_end_type?: string | number 
   let startDate: Date
   
   if (payPeriodEndType === 10) {
-    console.log('10일 종료')
     // 현재 11일 이후면 이번달 11일부터
     startDate = new Date(currentYear, currentMonth - 1, 12)
   } else {
-    console.log('20일 종료')
-    // 20일 종료: 이전달 21일부터 이번달 20일까지
     // 현재 21일 이후면 이번달 21일부터
     startDate = new Date(currentYear, currentMonth - 1, 22)
   }
@@ -64,6 +61,78 @@ const endDate = ref('')
 
 // 로딩 상태
 const loading = ref(false)
+
+// 수정요청 관련 상태
+const showChangeRequestModal = ref(false)
+const selectedRecordForChange = ref<AttendanceRecord | null>(null)
+const changeRequestForm = ref({
+  requested_date: '',
+  request_type: 'modify', // 'modify', 'cancel', 'register'
+  requested_check_in: '',
+  requested_check_out: '',
+  requested_scheduled_check_in: '',
+  requested_scheduled_check_out: '',
+  requested_break_time: '',
+  reason: ''
+})
+const submittingRequest = ref(false)
+
+// 등록요청 관련 상태
+const showRegistrationRequestModal = ref(false)
+const registrationRequestForm = ref({
+  requested_date: '',
+  requested_check_in: '',
+  requested_check_out: '',
+  requested_scheduled_check_in: '',
+  requested_scheduled_check_out: '',
+  requested_break_time: '',
+  reason: ''
+})
+const submittingRegistrationRequest = ref(false)
+
+// 요청 상태 관련 상태
+const changeRequests = ref<any[]>([])
+const loadingRequests = ref(false)
+
+// 시간 옵션 생성 (30분 간격)
+const generateTimeOptions = () => {
+  const options = []
+  for (let hour = 0; hour < 24; hour++) {
+    for (let minute = 0; minute < 60; minute += 30) {
+      const timeString = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`
+      options.push(timeString)
+    }
+  }
+  return options
+}
+
+// 휴게시간 옵션 생성 (30분 단위로 4시간까지)
+const generateBreakTimeOptions = () => {
+  const options = []
+  for (let hour = 0; hour <= 4; hour++) {
+    for (let minute = 0; minute < 60; minute += 30) {
+      const timeString = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`
+      options.push(timeString)
+    }
+  }
+  return options
+}
+
+const timeOptions = generateTimeOptions()
+const breakTimeOptions = generateBreakTimeOptions()
+
+// 시간 형식 변환 (HH:MM:SS → HH:MM)
+const formatTimeForSelect = (timeString: string | null | undefined) => {
+  if (!timeString) return '00:00'
+  
+  // HH:MM:SS 형식을 HH:MM으로 변환
+  const timeParts = timeString.split(':')
+  if (timeParts.length >= 2) {
+    return `${timeParts[0]}:${timeParts[1]}`
+  }
+  
+  return '00:00'
+}
 
 // 공휴일 목록 (향후 API로 자동 가져오도록 개선 예정)
 const holidays = ref<string[]>([])
@@ -153,6 +222,301 @@ watch(() => authStore.user, () => {
   }
 }, { immediate: true })
 
+// 수정요청 관련 함수들
+const openChangeRequestModal = (record: AttendanceRecord) => {
+  selectedRecordForChange.value = record
+  // 폼 초기화 - 시간을 셀렉트 형식으로 변환 (수정/취소 모두 기존 데이터로 초기화)
+  changeRequestForm.value = {
+    requested_date: record.date || '',
+    request_type: 'modify',
+    requested_check_in: formatTimeForSelect(record.check_in),
+    requested_check_out: formatTimeForSelect(record.check_out),
+    requested_scheduled_check_in: formatTimeForSelect(record.scheduled_check_in),
+    requested_scheduled_check_out: formatTimeForSelect(record.scheduled_check_out),
+    requested_break_time: formatTimeForSelect(record.break_time),
+    reason: ''
+  }
+  showChangeRequestModal.value = true
+}
+
+const closeChangeRequestModal = () => {
+  showChangeRequestModal.value = false
+  selectedRecordForChange.value = null
+  changeRequestForm.value = {
+    requested_date: '',
+    request_type: 'modify',
+    requested_check_in: '',
+    requested_check_out: '',
+    requested_scheduled_check_in: '',
+    requested_scheduled_check_out: '',
+    requested_break_time: '',
+    reason: ''
+  }
+}
+
+const submitChangeRequest = async () => {
+  if (!selectedRecordForChange.value) return
+  
+  submittingRequest.value = true
+  
+  try {
+    const { supabase } = await import('../lib/supabase')
+    
+    const { data, error } = await supabase
+      .from('attendance_change_requests')
+      .insert({
+        requested_date: changeRequestForm.value.requested_date,
+        attendance_record_id: selectedRecordForChange.value.id,
+        employee_id: selectedRecordForChange.value.employee_id,
+        request_type: changeRequestForm.value.request_type,
+        requested_check_in: changeRequestForm.value.request_type === 'modify' ? changeRequestForm.value.requested_check_in || null : selectedRecordForChange.value.check_in,
+        requested_check_out: changeRequestForm.value.request_type === 'modify' ? changeRequestForm.value.requested_check_out || null : selectedRecordForChange.value.check_out,
+        requested_scheduled_check_in: changeRequestForm.value.request_type === 'modify' ? changeRequestForm.value.requested_scheduled_check_in || null : selectedRecordForChange.value.scheduled_check_in,
+        requested_scheduled_check_out: changeRequestForm.value.request_type === 'modify' ? changeRequestForm.value.requested_scheduled_check_out || null : selectedRecordForChange.value.scheduled_check_out,
+        requested_break_time: changeRequestForm.value.request_type === 'modify' ? changeRequestForm.value.requested_break_time || null : selectedRecordForChange.value.break_time,
+        reason: changeRequestForm.value.reason,
+        status: 'pending'
+      })
+    
+    if (error) {
+      throw error
+    }
+    
+    closeChangeRequestModal()
+    
+    // 요청 목록 다시 로드
+    await loadChangeRequests()
+    
+    // 성공 메시지 표시 (선택사항)
+    alert('修正リクエストが送信されました。管理者の承認をお待ちください。')
+    
+  } catch (error) {
+    console.error('수정요청 제출 중 오류 발생:', error)
+    alert('修正リクエストの送信に失敗しました。')
+  } finally {
+    submittingRequest.value = false
+  }
+}
+
+// 등록요청 관련 함수들
+const openRegistrationRequestModal = () => {
+  // 폼 초기화 - 오늘 날짜로 설정
+  const today = new Date()
+  const todayString = today.toISOString().split('T')[0]
+  
+  registrationRequestForm.value = {
+    requested_date: todayString,
+    requested_check_in: '',
+    requested_check_out: '',
+    requested_scheduled_check_in: '',
+    requested_scheduled_check_out: '',
+    requested_break_time: '',
+    reason: ''
+  }
+  showRegistrationRequestModal.value = true
+}
+
+const closeRegistrationRequestModal = () => {
+  showRegistrationRequestModal.value = false
+  registrationRequestForm.value = {
+    requested_date: '',
+    requested_check_in: '',
+    requested_check_out: '',
+    requested_scheduled_check_in: '',
+    requested_scheduled_check_out: '',
+    requested_break_time: '',
+    reason: ''
+  }
+}
+
+const submitRegistrationRequest = async () => {
+  if (!selectedEmployee.value) return
+  
+  submittingRegistrationRequest.value = true
+  
+  try {
+    const { supabase } = await import('../lib/supabase')
+    
+    const { data, error } = await supabase
+      .from('attendance_change_requests')
+      .insert({
+        requested_date: registrationRequestForm.value.requested_date,
+        attendance_record_id: null, // 새로운 기록이므로 null
+        employee_id: selectedEmployee.value.id,
+        request_type: 'register',
+        requested_check_in: registrationRequestForm.value.requested_check_in || null,
+        requested_check_out: registrationRequestForm.value.requested_check_out || null,
+        requested_scheduled_check_in: registrationRequestForm.value.requested_scheduled_check_in || null,
+        requested_scheduled_check_out: registrationRequestForm.value.requested_scheduled_check_out || null,
+        requested_break_time: registrationRequestForm.value.requested_break_time || null,
+        reason: registrationRequestForm.value.reason,
+        status: 'pending'
+      })
+    
+    if (error) {
+      throw error
+    }
+
+    closeRegistrationRequestModal()
+    
+    // 요청 목록 다시 로드
+    await loadChangeRequests()
+    
+    // 성공 메시지 표시
+    alert('勤務記録登録リクエストが送信されました。管理者の承認をお待ちください。')
+    
+  } catch (error) {
+    console.error('등록요청 제출 중 오류 발생:', error)
+    alert('勤務記録登録リクエストの送信に失敗しました。')
+  } finally {
+    submittingRegistrationRequest.value = false
+  }
+}
+
+// 출근 기록 로드 함수
+const loadAttendanceRecords = async () => {
+  if (!selectedEmployee.value || !startDate.value || !endDate.value) return
+  
+  try {
+    await store.loadAttendanceRecords(startDate.value, endDate.value)
+  } catch (error) {
+    console.error('출근 기록 로드 중 오류 발생:', error)
+  }
+}
+
+// 요청 상태 관련 함수들
+const loadChangeRequests = async () => {
+  if (!selectedEmployee.value) return
+  
+  loadingRequests.value = true
+  
+  try {
+    const { supabase } = await import('../lib/supabase')
+    
+    const { data, error } = await supabase
+      .from('attendance_change_requests')
+      .select('*')
+      .eq('employee_id', selectedEmployee.value.id)
+      .order('created_at', { ascending: false })
+    
+    if (error) {
+      throw error
+    }
+    
+    changeRequests.value = data || []
+  } catch (error) {
+    console.error('요청 목록 로드 중 오류 발생:', error)
+  } finally {
+    loadingRequests.value = false
+  }
+}
+
+// 특정 기록에 대한 요청 상태 확인
+const getRequestStatus = (recordId: string | null, date: string) => {
+  if (recordId) {
+    // 기존 기록 수정/취소 요청
+    return changeRequests.value.find(req => 
+      req.attendance_record_id === recordId && req.status === 'pending'
+    )
+  } else {
+    // 새로운 기록 등록 요청
+    return changeRequests.value.find(req => 
+      !req.attendance_record_id && 
+      req.status === 'pending' &&
+      req.requested_date === date
+    )
+  }
+}
+
+// 요청 상태에 따른 버튼 텍스트
+const getRequestButtonText = (record: AttendanceRecord | null, date: string) => {
+  const request = getRequestStatus(record?.id || null, date)
+  if (request) {
+    return '要請中'
+  }
+  return record ? '修正/取消要請' : '勤務登録要請'
+}
+
+// 요청 상태에 따른 버튼 비활성화
+const isRequestButtonDisabled = (record: AttendanceRecord | null, date: string) => {
+  const request = getRequestStatus(record?.id || null, date)
+  return !!request
+}
+
+// 요청 상태 텍스트
+const getRequestStatusText = (status: string) => {
+  switch (status) {
+    case 'pending':
+      return '承認待ち'
+    case 'approved':
+      return '承認済み'
+    case 'rejected':
+      return '却下'
+    default:
+      return status
+  }
+}
+
+// 요청 상태 색상
+const getRequestStatusColor = (status: string) => {
+  switch (status) {
+    case 'pending':
+      return '#f39c12'
+    case 'approved':
+      return '#27ae60'
+    case 'rejected':
+      return '#e74c3c'
+    default:
+      return '#95a5a6'
+  }
+}
+
+// 요청 타입 텍스트
+const getRequestTypeText = (requestType: string) => {
+  switch (requestType) {
+    case 'register':
+      return '登録要請'
+    case 'modify':
+      return '修正要請'
+    case 'cancel':
+      return '取消要請'
+    default:
+      return requestType
+  }
+}
+
+// 요청 타입 색상
+const getRequestTypeColor = (requestType: string) => {
+  switch (requestType) {
+    case 'register':
+      return '#27ae60' // 초록색
+    case 'modify':
+      return '#3498db' // 파란색
+    case 'cancel':
+      return '#e74c3c' // 빨간색
+    default:
+      return '#95a5a6'
+  }
+}
+
+// 특정 날짜에 이미 기록이 있는지 확인
+const hasExistingRecord = (date: string) => {
+  if (!selectedEmployee.value) return false
+  
+  return store.attendanceRecords.some(record => 
+    record.employee_id === selectedEmployee.value?.id && 
+    record.date === date
+  )
+}
+
+// 특정 날짜에 이미 요청이 있는지 확인
+const hasExistingRequest = (date: string) => {
+  return changeRequests.value.some(request => 
+    request.requested_date === date && 
+    request.status === 'pending'
+  )
+}
+
 // 선택된 기간의 기록 조회
 const selectedPeriodRecords = computed(() => {
   if (!selectedEmployeeId.value) return []
@@ -167,6 +531,15 @@ const selectedPeriodRecords = computed(() => {
 // 선택된 직원 정보
 const selectedEmployee = computed(() => {
   return store.getEmployeeById(selectedEmployeeId.value)
+})
+
+// 직원이 변경될 때 요청 목록 로드
+watch(() => selectedEmployee.value, async (newEmployee) => {
+  if (newEmployee) {
+    await loadChangeRequests()
+  } else {
+    changeRequests.value = []
+  }
 })
 
 // 휴일 여부 확인 (주말 + 공휴일)
@@ -265,18 +638,15 @@ const calculateWorkHours = (checkInTime: string | null, checkOutTime: string | n
     if (checkInTime > scheduledCheckIn) {
       // 실제 출근시간이 늦으면 30분 단위로 올림
       adjustedCheckIn = roundUpToNearestHalfHour(checkInTime)
-      console.log('출근시간 조정됨 (늦음):', checkInTime, '→', adjustedCheckIn)
     } else if (checkInTime < scheduledCheckIn) {
       // 실제 출근시간이 빠르면 예상시간으로 조정
       adjustedCheckIn = scheduledCheckIn
-      console.log('출근시간 조정됨 (빠름):', checkInTime, '→', adjustedCheckIn)
     }
   }
   
   // 예상 퇴근시간이 있고, 실제 퇴근시간이 늦으면 30분 단위로 내림
   if (scheduledCheckOut && checkOutTime > scheduledCheckOut) {
     adjustedCheckOut = roundDownToNearestHalfHour(checkOutTime)
-    console.log('퇴근시간 조정됨:', checkOutTime, '→', adjustedCheckOut)
   }
   
   // 조정된 시간을 직접 분으로 변환 (반올림 없이)
@@ -288,9 +658,6 @@ const calculateWorkHours = (checkInTime: string | null, checkOutTime: string | n
   const checkInMinutes = getMinutesFromAdjustedTime(adjustedCheckIn)
   const checkOutMinutes = getMinutesFromAdjustedTime(adjustedCheckOut)
   
-  console.log('조정된 출근시간(분):', checkInMinutes, '(', adjustedCheckIn, ')')
-  console.log('조정된 퇴근시간(분):', checkOutMinutes, '(', adjustedCheckOut, ')')
-  
   // 퇴근시간이 출근시간보다 작으면 다음날로 간주 (야간근무)
   let workMinutes = checkOutMinutes - checkInMinutes
   if (workMinutes <= 0) {
@@ -298,8 +665,6 @@ const calculateWorkHours = (checkInTime: string | null, checkOutTime: string | n
   }
   
   const workHours = workMinutes / 60
-  console.log('총 근무시간(분):', workMinutes, '시간:', workHours)
-  console.log('=== 디버깅 끝 ===')
   
   return workHours
 }
@@ -308,20 +673,15 @@ const calculateWorkHours = (checkInTime: string | null, checkOutTime: string | n
 const calculateNetWorkHours = (checkInTime: string | null, checkOutTime: string | null, breakTime: string | null, isHoliday: boolean = false, scheduledCheckIn: string | null = null, scheduledCheckOut: string | null = null) => {
   if (!checkInTime || !checkOutTime) return 0
   
-  console.log('=== 순 근무시간 계산 디버깅 ===')
-  
   // 야간근무 여부 확인 (16:30 ~ 다음날 09:30) - 예상 출퇴근시간 기준
   const isNightShift = isNightShiftWork(checkInTime, checkOutTime, scheduledCheckIn, scheduledCheckOut)
   
   // 야간근무인 경우 14시간으로 고정
   if (isNightShift) {
-    console.log('야간근무로 14시간 고정')
-    console.log('=== 순 근무시간 디버깅 끝 ===')
     return 14
   }
   
   const totalWorkHours = calculateWorkHours(checkInTime, checkOutTime, scheduledCheckIn, scheduledCheckOut)
-  console.log('총 근무시간:', totalWorkHours, '시간')
   
   // 휴식시간 계산 (분 단위)
   const getBreakTimeMinutes = (breakTimeStr: string | null) => {
@@ -333,23 +693,17 @@ const calculateNetWorkHours = (checkInTime: string | null, checkOutTime: string 
   const breakTimeMinutes = getBreakTimeMinutes(breakTime)
   const breakTimeHoursForRecord = breakTimeMinutes / 60
   
-  console.log('휴식시간:', breakTime, '(', breakTimeHoursForRecord, '시간)')
   
   // 총 근무시간에서 휴식시간 제외
   const netWorkHours = totalWorkHours - breakTimeHoursForRecord
   
-  console.log('순 근무시간:', netWorkHours, '시간')
   
   // 휴일에 야간근무가 아닌 사람이 8시간 이상 근무한 경우 8시간으로 고정
   if (isHoliday && !isNightShift && netWorkHours >= 8) {
-    console.log('휴일 8시간 제한 적용')
-    console.log('=== 순 근무시간 디버깅 끝 ===')
     return 8
   }
   
   const finalHours = Math.max(0, netWorkHours) // 음수가 되지 않도록
-  console.log('최종 순 근무시간:', finalHours, '시간')
-  console.log('=== 순 근무시간 디버깅 끝 ===')
   
   return finalHours
 }
@@ -438,10 +792,6 @@ const workStats = computed(() => {
               
               // 휴일출근시간에서 휴게시간 제외
               const adjustedHolidayHours = recognizedWorkHours - breakTimeHoursForRecord
-              
-              console.log('인정 근무시간:', recognizedWorkHours, '시간')
-              console.log('휴게시간:', breakTimeHoursForRecord, '시간')
-              console.log('조정된 휴일출근시간:', adjustedHolidayHours, '시간')
               
               holidayWorkHours += Math.max(0, adjustedHolidayHours) // 음수가 되지 않도록
               
@@ -678,6 +1028,18 @@ const formatTime = (timeString: string | null) => {
   return timeString
 }
 
+const formatDateTime = (dateTimeString: string) => {
+  if (!dateTimeString) return '-'
+  const date = new Date(dateTimeString)
+  return date.toLocaleString('ja-JP', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
+
 // 근무 상태 텍스트
 const getWorkStatusText = (record: AttendanceRecord) => {
   if (!record.check_in) return '未出勤'
@@ -767,10 +1129,30 @@ watch(selectedEmployeeId, () => {
   endDate.value = getDefaultEndDate(selectedEmployee.value)
 })
 
+// startDate가 변경될 때 endDate 유효성 검사 및 자동 검색
+watch(startDate, (newStartDate) => {
+  if (newStartDate && endDate.value && newStartDate > endDate.value) {
+    endDate.value = newStartDate
+  }
+  // 날짜가 변경되면 자동으로 검색 실행
+  if (selectedEmployee.value) {
+    loadAttendanceRecords()
+  }
+})
+
+// endDate가 변경될 때 유효성 검사 및 자동 검색
+watch(endDate, (newEndDate) => {
+  if (newEndDate && startDate.value && newEndDate < startDate.value) {
+    endDate.value = startDate.value
+  }
+  // 날짜가 변경되면 자동으로 검색 실행
+  if (selectedEmployee.value) {
+    loadAttendanceRecords()
+  }
+})
+
 // 회사 선택이 변경될 때 직원 선택 초기화
 watch(selectedCompanyId, (newCompanyId) => {
-  console.log('회사 선택 변경:', newCompanyId)
-  console.log('해당 회사의 직원 수:', store.getEmployeeByCompanyId(newCompanyId).length)
   selectedEmployeeId.value = ''
   startDate.value = getDefaultStartDate()
   endDate.value = getDefaultEndDate()
@@ -852,6 +1234,7 @@ watch(selectedCompanyId, (newCompanyId) => {
             type="date" 
             v-model="startDate"
             class="date-input-field"
+            :class="{ 'error': startDate && endDate && startDate > endDate }"
           />
         </div>
         <div class="date-input">
@@ -861,7 +1244,11 @@ watch(selectedCompanyId, (newCompanyId) => {
             type="date" 
             v-model="endDate"
             class="date-input-field"
+            :class="{ 'error': startDate && endDate && endDate < startDate }"
           />
+          <div v-if="startDate && endDate && endDate < startDate" class="error-message">
+            終了日は開始日以降の日付を選択してください。
+          </div>
         </div>
       </div>
     </div>
@@ -994,7 +1381,16 @@ watch(selectedCompanyId, (newCompanyId) => {
 
     <!-- 상세 근무 기록 -->
     <div v-if="selectedEmployee" class="work-records">
-      <h2>詳細勤務記録</h2>
+      <div class="work-records-header">
+        <h2>詳細勤務記録</h2>
+        <button 
+          @click="openRegistrationRequestModal"
+          class="registration-request-btn"
+          :title="isRequestButtonDisabled(null, new Date().toISOString().split('T')[0]) || hasExistingRecord(new Date().toISOString().split('T')[0]) ? '이미 등록된 날짜입니다' : '勤務記録登録リクエストを送信'"
+        >
+          ➕ 勤務登録要請
+        </button>
+      </div>
       <div v-if="selectedPeriodRecords.length === 0" class="no-records">
         選択された期間の勤務記録がありません。
       </div>
@@ -1013,6 +1409,7 @@ watch(selectedCompanyId, (newCompanyId) => {
               <th>日勤</th>
               <th>勤務時間</th>
               <th>状態</th>
+              <th>操作</th>
             </tr>
           </thead>
           <tbody>
@@ -1049,9 +1446,298 @@ watch(selectedCompanyId, (newCompanyId) => {
                   {{ getWorkStatusText(record) }}
                 </span>
               </td>
+              <td>
+                <button 
+                  @click="openChangeRequestModal(record)"
+                  class="change-request-btn"
+                  :class="{ 'disabled': isRequestButtonDisabled(record, record.date) }"
+                  :disabled="isRequestButtonDisabled(record, record.date)"
+                  :title="isRequestButtonDisabled(record, record.date) ? '요청 처리중' : '修正リクエストを送信'"
+                >
+                  {{ getRequestButtonText(record, record.date) }}
+                </button>
+              </td>
             </tr>
           </tbody>
         </table>
+      </div>
+    </div>
+
+    <!-- 요청보낸 리스트 -->
+    <div v-if="selectedEmployee && changeRequests.length > 0" class="requests-section">
+      <h3>送信済みリクエスト</h3>
+      <div class="records-table">
+        <table>
+          <thead>
+            <tr>
+              <th>日付</th>
+              <th>タイプ</th>
+              <th>出勤時間</th>
+              <th>退勤時間</th>
+              <th>予想出勤</th>
+              <th>予想退勤</th>
+              <th>休憩時間</th>
+              <th>理由</th>
+              <th>状態</th>
+              <th>送信日時</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="request in changeRequests" :key="request.id">
+              <td>{{ formatDate(request.requested_date) }}</td>
+                              <td>
+                  <span class="request-type-badge" :style="{ backgroundColor: getRequestTypeColor(request.request_type) }">
+                    {{ getRequestTypeText(request.request_type) }}
+                  </span>
+                </td>
+              <td>{{ formatTime(request.requested_check_in) }}</td>
+              <td>{{ formatTime(request.requested_check_out) }}</td>
+              <td>{{ formatTime(request.requested_scheduled_check_in) }}</td>
+              <td>{{ formatTime(request.requested_scheduled_check_out) }}</td>
+              <td>{{ formatTime(request.requested_break_time) }}</td>
+              <td class="reason-cell">
+                <div class="reason-text" :title="request.reason">
+                  {{ request.reason }}
+                </div>
+              </td>
+              <td>
+                <span class="status-badge" :style="{ backgroundColor: getRequestStatusColor(request.status) }">
+                  {{ getRequestStatusText(request.status) }}
+                </span>
+              </td>
+              <td>{{ formatDateTime(request.created_at) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 수정요청 모달 -->
+    <div v-if="showChangeRequestModal" class="modal-overlay" @click="closeChangeRequestModal">
+      <div class="modal-content" @click.stop>
+        <div class="modal-header">
+          <h3>勤務記録修正リクエスト</h3>
+          <button @click="closeChangeRequestModal" class="close-btn">×</button>
+        </div>
+        
+        <div class="modal-body">
+          <div class="record-info">
+            <p><strong>対象日:</strong> {{ selectedRecordForChange ? formatDate(selectedRecordForChange.date) : '' }}</p>
+            <p><strong>従業員:</strong> {{ selectedEmployee?.last_name }}{{ selectedEmployee?.first_name }}</p>
+          </div>
+          
+          <form @submit.prevent="submitChangeRequest" class="change-request-form">
+            <div class="form-group">
+              <label>リクエストタイプ <span class="required">*</span></label>
+              <select 
+                v-model="changeRequestForm.request_type"
+                class="form-input"
+                required
+              >
+                <option value="modify">修正要請</option>
+                <option value="cancel">取消要請</option>
+              </select>
+            </div>
+            
+                        <div class="time-inputs">
+              <div class="form-group">
+                <label>出勤時間</label>
+                <input 
+                  type="time" 
+                  v-model="changeRequestForm.requested_check_in"
+                  class="form-input"
+                  :disabled="changeRequestForm.request_type === 'cancel'"
+                  step="1"
+                >
+              </div>
+              
+              <div class="form-group">
+                <label>退勤時間</label>
+                <input 
+                  type="time" 
+                  v-model="changeRequestForm.requested_check_out"
+                  class="form-input"
+                  :disabled="changeRequestForm.request_type === 'cancel'"
+                  step="1"
+                >
+              </div>
+              
+              <div class="form-group">
+                <label>予想出勤時間</label>
+                <select 
+                  v-model="changeRequestForm.requested_scheduled_check_in"
+                  class="form-input time-select"
+                  :disabled="changeRequestForm.request_type === 'cancel'"
+                >
+                  <option v-for="time in timeOptions" :key="time" :value="time">{{ time }}</option>
+                </select>
+              </div>
+              
+              <div class="form-group">
+                <label>予想退勤時間</label>
+                <select 
+                  v-model="changeRequestForm.requested_scheduled_check_out"
+                  class="form-input time-select"
+                  :disabled="changeRequestForm.request_type === 'cancel'"
+                >
+                  <option v-for="time in timeOptions" :key="time" :value="time">{{ time }}</option>
+                </select>
+              </div>
+              
+              <div class="form-group">
+                <label>休憩時間</label>
+                <select 
+                  v-model="changeRequestForm.requested_break_time"
+                  class="form-input time-select"
+                  :disabled="changeRequestForm.request_type === 'cancel'"
+                >
+                  <option v-for="time in breakTimeOptions" :key="time" :value="time">{{ time }}</option>
+                </select>
+              </div>
+            </div>
+            
+
+            
+            <div class="form-group">
+              <label>{{ changeRequestForm.request_type === 'modify' ? '修正理由' : changeRequestForm.request_type === 'cancel' ? '取消理由' : '登録理由' }} <span class="required">*</span></label>
+              <textarea 
+                v-model="changeRequestForm.reason"
+                class="form-textarea"
+                :placeholder="changeRequestForm.request_type === 'modify' ? '修正理由を入力してください' : changeRequestForm.request_type === 'cancel' ? '取消理由を入力してください' : '登録理由を入力してください'"
+                required
+              ></textarea>
+            </div>
+            
+            <div class="form-actions">
+              <button 
+                type="button" 
+                @click="closeChangeRequestModal"
+                class="btn-secondary"
+              >
+                キャンセル
+              </button>
+              <button 
+                type="submit" 
+                :disabled="submittingRequest || !changeRequestForm.reason"
+                class="btn-primary"
+              >
+                {{ submittingRequest ? '送信中...' : 'リクエスト送信' }}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- 등록요청 모달 -->
+    <div v-if="showRegistrationRequestModal" class="modal-overlay" @click="closeRegistrationRequestModal">
+      <div class="modal-content" @click.stop>
+        <div class="modal-header">
+          <h3>勤務記録登録リクエスト</h3>
+          <button @click="closeRegistrationRequestModal" class="close-btn">×</button>
+        </div>
+        
+        <div class="modal-body">
+          <div class="record-info">
+            <p><strong>従業員:</strong> {{ selectedEmployee?.last_name }}{{ selectedEmployee?.first_name }}</p>
+          </div>
+          
+          <form @submit.prevent="submitRegistrationRequest" class="change-request-form">
+            <div class="form-group">
+              <label>対象日 <span class="required">*</span></label>
+              <input 
+                type="date" 
+                v-model="registrationRequestForm.requested_date"
+                class="form-input"
+                :class="{ 'error': hasExistingRecord(registrationRequestForm.requested_date) || hasExistingRequest(registrationRequestForm.requested_date) }"
+                required
+              >
+              <div v-if="hasExistingRecord(registrationRequestForm.requested_date)" class="error-message">
+                この日付には既に勤務記録が存在します。
+              </div>
+              <div v-if="hasExistingRequest(registrationRequestForm.requested_date)" class="error-message">
+                この日付には既にリクエストが送信されています。
+              </div>
+            </div>
+            
+            <div class="form-group">
+              <label>出勤時間</label>
+              <input 
+                type="time" 
+                v-model="registrationRequestForm.requested_check_in"
+                class="form-input"
+                step="1"
+              >
+            </div>
+            
+            <div class="form-group">
+              <label>退勤時間</label>
+              <input 
+                type="time" 
+                v-model="registrationRequestForm.requested_check_out"
+                class="form-input"
+                step="1"
+              >
+            </div>
+            
+            <div class="form-group">
+              <label>予想出勤時間</label>
+              <select 
+                v-model="registrationRequestForm.requested_scheduled_check_in"
+                class="form-input time-select"
+              >
+                <option v-for="time in timeOptions" :key="time" :value="time">{{ time }}</option>
+              </select>
+            </div>
+            
+            <div class="form-group">
+              <label>予想退勤時間</label>
+              <select 
+                v-model="registrationRequestForm.requested_scheduled_check_out"
+                class="form-input time-select"
+              >
+                <option v-for="time in timeOptions" :key="time" :value="time">{{ time }}</option>
+              </select>
+            </div>
+            
+            <div class="form-group">
+              <label>休憩時間</label>
+              <select 
+                v-model="registrationRequestForm.requested_break_time"
+                class="form-input time-select"
+              >
+                <option v-for="time in breakTimeOptions" :key="time" :value="time">{{ time }}</option>
+              </select>
+            </div>
+            
+            <div class="form-group">
+              <label>登録理由 <span class="required">*</span></label>
+              <textarea 
+                v-model="registrationRequestForm.reason"
+                class="form-textarea"
+                placeholder="登録理由を入力してください"
+                required
+              ></textarea>
+            </div>
+            
+            <div class="form-actions">
+              <button 
+                type="button" 
+                @click="closeRegistrationRequestModal"
+                class="btn-secondary"
+              >
+                キャンセル
+              </button>
+              <button 
+                type="submit" 
+                :disabled="submittingRegistrationRequest || !registrationRequestForm.reason || !registrationRequestForm.requested_date || hasExistingRecord(registrationRequestForm.requested_date) || hasExistingRequest(registrationRequestForm.requested_date)"
+                class="btn-primary"
+              >
+                {{ submittingRegistrationRequest ? '送信中...' : 'リクエスト送信' }}
+              </button>
+            </div>
+          </form>
+        </div>
       </div>
     </div>
   </div>
@@ -1248,6 +1934,11 @@ watch(selectedCompanyId, (newCompanyId) => {
 .date-input-field:focus {
   outline: none;
   border-color: #667eea;
+}
+
+.date-input-field.error {
+  border-color: #e74c3c;
+  background-color: #fdf2f2;
 }
 
 .employee-info {
@@ -1735,6 +2426,331 @@ watch(selectedCompanyId, (newCompanyId) => {
 
 .holiday-salary .salary-label {
   color: #e74c3c;
+}
+
+/* 수정요청 버튼 스타일 */
+.change-request-btn {
+  background: #3498db;
+  color: white;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: background-color 0.3s ease;
+}
+
+.change-request-btn:hover {
+  background: #2980b9;
+}
+
+/* 등록요청 버튼 스타일 */
+.work-records-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2rem;
+}
+
+.work-records-header h2 {
+  margin: 0;
+}
+
+.registration-request-btn {
+  background: #27ae60;
+  color: white;
+  border: none;
+  padding: 0.75rem 1.5rem;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 1rem;
+  font-weight: 600;
+  transition: background-color 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.registration-request-btn:hover {
+  background: #229954;
+}
+
+.registration-request-btn.disabled,
+.change-request-btn.disabled {
+  background: #bdc3c7 !important;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* 요청보낸 리스트 스타일 */
+.requests-section {
+  margin-top: 3rem;
+  background: rgba(255, 255, 255, 0.9);
+  border-radius: 20px;
+  box-shadow: 0 6px 25px rgba(0, 0, 0, 0.1);
+  padding: 2rem;
+}
+
+.requests-section h3 {
+  margin: 0 0 1.5rem 0;
+  color: #2c3e50;
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+.requests-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  color: #2c3e50;
+}
+
+.requests-table th,
+.requests-table td {
+  padding: 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.requests-table th {
+  background: #f8f9fa;
+  font-weight: 600;
+  color: #2c3e50;
+}
+
+.request-type {
+  background: #3498db;
+  color: white;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.request-type-badge {
+  color: white;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  display: inline-block;
+}
+
+.reason-cell {
+  max-width: 200px;
+}
+
+.reason-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
+}
+
+.time-inputs {
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  background: #f8f9fa;
+}
+
+
+
+/* 모달 스타일 */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: white;
+  border-radius: 12px;
+  width: 90%;
+  max-width: 600px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.5rem 2rem;
+  border-bottom: 2px solid #e0e0e0;
+}
+
+.modal-header h3 {
+  margin: 0;
+  color: #2c3e50;
+  font-size: 1.5rem;
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  font-size: 2rem;
+  cursor: pointer;
+  color: #7f8c8d;
+  padding: 0;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.close-btn:hover {
+  color: #e74c3c;
+}
+
+.modal-body {
+  padding: 2rem;
+}
+
+.record-info {
+  background: #f8f9fa;
+  padding: 1rem;
+  border-radius: 8px;
+  margin-bottom: 1.5rem;
+}
+
+.record-info p {
+  margin: 0.5rem 0;
+  color: #2c3e50;
+}
+
+.change-request-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.form-group label {
+  font-weight: 600;
+  color: #2c3e50;
+  font-size: 1rem;
+}
+
+.required {
+  color: #e74c3c;
+}
+
+.form-input,
+.form-textarea {
+  padding: 0.75rem;
+  border: 2px solid #e0e0e0;
+  border-radius: 6px;
+  font-size: 1rem;
+  transition: border-color 0.3s ease;
+}
+
+.form-input:focus,
+.form-textarea:focus {
+  outline: none;
+  border-color: #3498db;
+}
+
+.form-input.error {
+  border-color: #e74c3c;
+  background-color: #fdf2f2;
+}
+
+.time-select {
+  padding: 0.75rem;
+  border: 2px solid #e0e0e0;
+  border-radius: 6px;
+  font-size: 1rem;
+  background: white;
+  transition: border-color 0.3s ease;
+  cursor: pointer;
+}
+
+.time-select:focus {
+  outline: none;
+  border-color: #3498db;
+}
+
+.time-select:hover {
+  border-color: #3498db;
+}
+
+.time-select:disabled {
+  background-color: #f8f9fa;
+  color: #6c757d;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.time-select:disabled:hover {
+  border-color: #e0e0e0;
+}
+
+.error-message {
+  color: #e74c3c;
+  font-size: 0.9rem;
+  margin-top: 0.5rem;
+  font-weight: 500;
+}
+
+.form-textarea {
+  min-height: 100px;
+  resize: vertical;
+}
+
+.form-actions {
+  display: flex;
+  gap: 1rem;
+  justify-content: flex-end;
+  margin-top: 1rem;
+}
+
+.btn-primary,
+.btn-secondary {
+  padding: 0.75rem 1.5rem;
+  border: none;
+  border-radius: 6px;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.btn-primary {
+  background: #3498db;
+  color: white;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #2980b9;
+}
+
+.btn-primary:disabled {
+  background: #bdc3c7;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  background: #95a5a6;
+  color: white;
+}
+
+.btn-secondary:hover {
+  background: #7f8c8d;
 }
 
 @media (max-width: 768px) {

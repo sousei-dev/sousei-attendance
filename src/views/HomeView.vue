@@ -697,6 +697,7 @@ const closeEmployeeModal = () => {
             />
             <span class="search-icon">🔍</span>
           </div>
+
         </div>
       </div>
 
@@ -1186,6 +1187,8 @@ const closeEmployeeModal = () => {
   color: #7f8c8d;
   font-size: 1.3rem;
 }
+
+
 
 .employees-table {
   width: 100%;

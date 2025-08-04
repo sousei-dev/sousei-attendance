@@ -182,6 +182,7 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
       let query = supabase
         .from('attendance_records')
         .select('*')
+        .eq('is_deleted', false)
         .order('date', { ascending: false })
 
       if (startDate) {
@@ -511,6 +512,9 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
       const index = attendanceRecords.value.findIndex((r) => r.id === record.id)
       if (index !== -1) {
         attendanceRecords.value[index] = data
+      } else {
+        // 인덱스를 찾지 못한 경우 배열에 추가
+        attendanceRecords.value.push(data)
       }
     } catch (err) {
       error.value = err instanceof Error ? err.message : '退勤処理に失敗しました。'

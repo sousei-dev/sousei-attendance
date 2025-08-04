@@ -22,6 +22,12 @@ const router = createRouter({
       component: () => import('../views/EmployeesAttendanceView.vue'),
       meta: { requiresAuth: true },
     },
+    {
+      path: '/approval',
+      name: 'approval',
+      component: () => import('../views/ApprovalView.vue'),
+      meta: { requiresAuth: true, requiresAdmin: true },
+    },
     // {
     //   path: '/attendance',
     //   name: 'attendance',
@@ -55,6 +61,22 @@ router.beforeEach(async (to, from, next) => {
       next('/login')
     } else if (to.path === '/login' && isLoggedIn) {
       next('/')
+    } else if (to.meta.requiresAdmin) {
+      // 관리자 권한 확인
+      if (session?.user) {
+        const { data: userData } = await supabase
+          .from('users')
+          .select('role')
+          .eq('id', session.user.id)
+          .single()
+        
+        if (userData?.role !== 'admin') {
+          alert('管理者権限が必要です。')
+          next('/')
+          return
+        }
+      }
+      next()
     } else {
       next()
     }
