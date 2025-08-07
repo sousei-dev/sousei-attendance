@@ -352,9 +352,22 @@ const rejectRequest = async (requestId: string) => {
   }
 }
 
-// 필터 변경 시 페이지 초기화
-const handleFilterChange = () => {
-  currentPage.value = 1
+// 툴팁 관련
+const tooltip = ref<HTMLElement | null>(null)
+
+const showTooltip = (event: MouseEvent, text: string) => {
+  if (!tooltip.value) return
+  
+  tooltip.value.textContent = text
+  tooltip.value.style.display = 'block'
+  tooltip.value.style.left = event.pageX + 10 + 'px'
+  tooltip.value.style.top = event.pageY + 10 + 'px'
+}
+
+const hideTooltip = () => {
+  if (tooltip.value) {
+    tooltip.value.style.display = 'none'
+  }
 }
 
 // 페이지 변경
@@ -386,6 +399,8 @@ onMounted(async () => {
 
 <template>
   <div class="approval-page">
+    <!-- 툴팁 요소 -->
+    <div ref="tooltip" class="tooltip"></div>
     <!-- 로딩 상태 표시 -->
     <div v-if="loading" class="loading-overlay">
       <div class="loading-spinner"></div>
@@ -400,7 +415,7 @@ onMounted(async () => {
     <div class="filter-section">
       <div class="filter-group">
         <label>ステータス:</label>
-        <select v-model="statusFilter" @change="handleFilterChange" class="filter-select">
+        <select v-model="statusFilter" @change="loadApprovalRequests" class="filter-select">
           <option value="all">すべて</option>
           <option value="pending">承認待ち</option>
           <option value="approved">承認済み</option>
@@ -410,7 +425,7 @@ onMounted(async () => {
       
       <div class="filter-group">
         <label>リクエストタイプ:</label>
-        <select v-model="requestTypeFilter" @change="handleFilterChange" class="filter-select">
+        <select v-model="requestTypeFilter" @change="loadApprovalRequests" class="filter-select">
           <option value="all">すべて</option>
           <option value="register">登録要請</option>
           <option value="modify">修正要請</option>
@@ -470,7 +485,7 @@ onMounted(async () => {
               <td>{{ formatTime(request.requested_scheduled_check_out) }}</td>
               <td>{{ formatTime(request.requested_break_time) }}</td>
               <td class="reason-cell">
-                <div class="reason-text" :title="request.reason">
+                <div class="reason-text" :title="request.reason" @mouseenter="showTooltip($event, request.reason)" @mouseleave="hideTooltip">
                   {{ request.reason }}
                 </div>
               </td>
@@ -539,6 +554,20 @@ onMounted(async () => {
   box-sizing: border-box;
   padding: 3rem;
   font-size: 1.1rem;
+}
+
+.tooltip {
+  position: fixed;
+  display: none;
+  background: rgba(0, 0, 0, 0.8);
+  color: white;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  max-width: 300px;
+  word-wrap: break-word;
+  z-index: 1000;
+  pointer-events: none;
 }
 
 .loading-overlay {
