@@ -1314,7 +1314,7 @@ const downloadExcel = async () => {
     const csvData = generateCSVData(facilityStats, selectedFacility, selectedCompany)
     
     // 파일 다운로드
-    downloadCSVFile(csvData, `${selectedCompany?.name}_${selectedFacility?.name}_${year}년${month}월_근무통계.csv`)
+    downloadCSVFile(csvData, `${selectedCompany?.name}_${selectedFacility?.name}_${year}年${month}月_勤務記録.csv`)
     
     // 성공 메시지
     alert('エクセルファイルが正常にダウンロードされました。')
