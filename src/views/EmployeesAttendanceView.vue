@@ -91,8 +91,35 @@ const registrationRequestForm = ref({
 const submittingRegistrationRequest = ref(false)
 
 // 요청 상태 관련 상태
-const changeRequests = ref<any[]>([])
+const changeRequests = ref<{
+  id: string
+  requested_date: string
+  attendance_record_id: string | null
+  employee_id: string
+  request_type: 'register' | 'modify' | 'cancel'
+  requested_check_in: string | null
+  requested_check_out: string | null
+  requested_scheduled_check_in: string | null
+  requested_scheduled_check_out: string | null
+  requested_break_time: string | null
+  reason: string
+  status: 'pending' | 'approved' | 'rejected'
+  created_at: string
+}[]>([])
 const loadingRequests = ref(false)
+
+// 엑셀다운로드 관련 상태
+const showExcelDownloadModal = ref(false)
+const excelDownloadStep = ref(1) // 1: 월선택, 2: 회사선택, 3: 시설선택
+const excelDownloadForm = ref({
+  selectedMonth: '',
+  selectedCompanyId: '',
+  selectedFacilityId: ''
+})
+const downloadingExcel = ref(false)
+
+// 어드민 섹션 토글 상태
+const showAdminSection = ref(false)
 
 // 시간 옵션 생성 (30분 간격)
 const generateTimeOptions = () => {
@@ -262,7 +289,7 @@ const submitChangeRequest = async () => {
   try {
     const { supabase } = await import('../lib/supabase')
     
-    const { data, error } = await supabase
+    const { error } = await supabase
       .from('attendance_change_requests')
       .insert({
         requested_date: changeRequestForm.value.requested_date,
@@ -337,7 +364,7 @@ const submitRegistrationRequest = async () => {
   try {
     const { supabase } = await import('../lib/supabase')
     
-    const { data, error } = await supabase
+    const { error } = await supabase
       .from('attendance_change_requests')
       .insert({
         requested_date: registrationRequestForm.value.requested_date,
@@ -545,8 +572,18 @@ watch(() => selectedEmployee.value, async (newEmployee) => {
 // 휴일 여부 확인 (주말 + 공휴일)
 const isHoliday = (dateString: string) => {
   const date = new Date(dateString)
-  const isWeekend = date.getDay() === 0 // 일요일(0) 또는 토요일(6)
+  const dayOfWeek = date.getDay()
+  const isWeekend = dayOfWeek === 0 // 원래 로직: 일요일만 휴일
   const isPublicHoliday = holidays.value.includes(dateString)
+  
+  // 디버깅 로그 추가
+  console.log('=== 휴일 판정 ===')
+  console.log('날짜:', dateString)
+  console.log('요일:', ['일', '월', '화', '수', '목', '금', '토'][dayOfWeek])
+  console.log('요일 숫자:', dayOfWeek)
+  console.log('주말 여부:', isWeekend)
+  console.log('공휴일 여부:', isPublicHoliday)
+  console.log('최종 휴일 여부:', isWeekend || isPublicHoliday)
   
   return isWeekend || isPublicHoliday
 }
@@ -711,17 +748,18 @@ const calculateNetWorkHours = (checkInTime: string | null, checkOutTime: string 
 // 근무 통계 계산
 const workStats = computed(() => {
   const records = selectedPeriodRecords.value
-  let holidayWorkHours = 0
-  let holidayExcludedHours = 0
-  let weekdayWorkHours = 0
-  let earlyShiftHours = 0
-  let lateShiftHours = 0
-  let dayShiftHours = 0
-  let totalWorkDays = 0
+  let holidayWorkHours = 0 // 휴일 근무시간
+  let holidayExcludedHours = 0 // 휴일 근무시간 제외 시간
+  let weekdayWorkHours = 0 // 평일 근무시간
+  let earlyShiftHours = 0 // 早出 근무시간
+  let lateShiftHours = 0 // 遅出 근무시간
+  let dayShiftHours = 0 // 日勤 근무시간
+  let totalWorkDays = 0 // 총 근무일수
   let nightShiftCount = 0 // 야근근무 횟수
 
-  // 선택된 회사 ID 확인
-  const isSpecialCompany = selectedCompanyId.value === 'f41d81fc-2472-495e-ac0d-19e836dc613b'
+  // 선택된 회사 ID 확인 - 동적으로 판정
+  const selectedCompany = store.companies.find(company => company.id === selectedCompanyId.value)
+  const isSpecialCompany = selectedCompany?.is_special_company || false
 
   records.forEach(record => {
     if (record.check_in && record.check_out) {
@@ -755,61 +793,71 @@ const workStats = computed(() => {
         if (isSpecialCompany) {
           // 휴일출근시간을 계산하지 않고 평일 근무시간에 포함
           weekdayWorkHours += netWorkHours
+          
+          // 디버깅 로그 추가
+          console.log('=== 특별한 회사 휴일근무 ===')
+          console.log('날짜:', record.date)
+          console.log('출근시간:', record.check_in)
+          console.log('퇴근시간:', record.check_out)
+          console.log('예상출근:', record.scheduled_check_in)
+          console.log('예상퇴근:', record.scheduled_check_out)
+          console.log('휴식시간:', record.break_time)
+          console.log('순근무시간:', netWorkHours)
+          console.log('평일근무시간에 포함됨')
+          console.log('누적된 평일근무시간:', weekdayWorkHours)
         } else {
           // 기존 로직 (일반 회사)
-          // 야간근무가 아닌 경우 9:00~18:00 사이의 근무만 휴일출근시간으로 인정
+          // 야간근무가 아닌 경우 09:00~18:00 사이의 근무만 휴일출근시간으로 인정
           if (!record.is_night_shift) {
-            let adjustedCheckIn = record.check_in
-            let adjustedCheckOut = record.check_out
             
-            // 예상 출근시간이 있고, 실제 출근시간이 늦으면 30분 단위로 올림
-            if (record.scheduled_check_in) {
-              if (record.check_in > record.scheduled_check_in) {
-                // 실제 출근시간이 늦으면 30분 단위로 올림
-                adjustedCheckIn = roundUpToNearestHalfHour(record.check_in)
-              } else if (record.check_in < record.scheduled_check_in) {
-                // 실제 출근시간이 빠르면 예상시간으로 조정
-                adjustedCheckIn = record.scheduled_check_in
-              }
-            }
+            // calculateShiftHours 함수를 사용해서 정확한 日勤勤務시간 계산
+            const shiftHours = calculateShiftHours(record.check_in, record.check_out, record.break_time, isHoliday(record.date), record.scheduled_check_in, record.scheduled_check_out)
             
-            // 예상 퇴근시간이 있고, 실제 퇴근시간이 늦으면 30분 단위로 내림
-            if (record.scheduled_check_out && record.check_out > record.scheduled_check_out) {
-              adjustedCheckOut = roundDownToNearestHalfHour(record.check_out)
-            }
+            // 日勤勤務시간만 휴일출근시간으로 계산
+            const dayShiftHoursForHoliday = shiftHours.day
             
-            // 30분 단위로 반올림된 시간으로 계산
-            const checkInMinutes = getMinutesFromTime(adjustedCheckIn)
-            const checkOutMinutes = getMinutesFromTime(adjustedCheckOut)
-            
-            // 9:00 (540분) ~ 18:00 (1080분) 사이의 근무시간 계산
-            const workStartMinutes = Math.max(checkInMinutes, 540) // 9:00
-            const workEndMinutes = Math.min(checkOutMinutes, 1080) // 18:00
-            
-            if (workStartMinutes < workEndMinutes) {
-              const recognizedWorkMinutes = workEndMinutes - workStartMinutes
-              const recognizedWorkHours = recognizedWorkMinutes / 60
-              
-              // 휴일출근시간에서 휴게시간 제외
-              const adjustedHolidayHours = recognizedWorkHours - breakTimeHoursForRecord
-              
-              holidayWorkHours += Math.max(0, adjustedHolidayHours) // 음수가 되지 않도록
+            if (dayShiftHoursForHoliday > 0) {
+              holidayWorkHours += dayShiftHoursForHoliday
               
               // 제외된 시간 계산 (전체 근무시간 - 인정된 근무시간)
-              const excludedHours = netWorkHours - Math.max(0, adjustedHolidayHours)
+              const excludedHours = netWorkHours - dayShiftHoursForHoliday
               holidayExcludedHours += Math.max(0, excludedHours)
+              
+              console.log('=== 일반 회사 휴일근무 계산 ===')
+              console.log('날짜:', record.date)
+              console.log('출근시간:', record.check_in)
+              console.log('퇴근시간:', record.check_out)
+              console.log('예상출근:', record.scheduled_check_in)
+              console.log('예상퇴근:', record.scheduled_check_out)
+              console.log('휴게시간:', record.break_time)
+              console.log('日勤勤務時間:', dayShiftHoursForHoliday, '시간')
+              console.log('휴일출근시간:', dayShiftHoursForHoliday, '시간')
+              console.log('- 제외된 시간:', excludedHours, '시간')
+              console.log('- 누적된 휴일출근시간:', holidayWorkHours, '시간')
+              console.log('- 누적된 제외시간:', holidayExcludedHours, '시간')
             } else {
-              // 9:00~18:00 외 시간이므로 모두 제외
+              // 日勤勤務시간이 없는 경우 모두 제외
               holidayExcludedHours += netWorkHours
+              console.log('日勤勤務시간이 없음 - 모두 제외됨')
+              console.log('- 제외된 시간:', netWorkHours, '시간')
+              console.log('- 누적된 제외시간:', holidayExcludedHours, '시간')
             }
           } else {
-            // 야간근무는 전체 시간에서 휴식시간 제외
-            holidayWorkHours += netWorkHours
+            // 야간근무는 휴일 근무로 계산하지 않고 평일 근무시간에 포함
+            weekdayWorkHours += netWorkHours
+            console.log('야간근무 휴일근무 - 휴일 근무로 계산하지 않음, 평일 근무시간에 포함')
+            console.log('- 평일근무시간에 포함:', netWorkHours, '시간')
+            console.log('- 누적된 평일근무시간:', weekdayWorkHours, '시간')
           }
         }
       } else {
         // 평일 근무시간 (휴일이 아닌 경우)
         weekdayWorkHours += netWorkHours
+        
+        console.log('=== 평일근무 ===')
+        console.log('날짜:', record.date)
+        console.log('순근무시간:', netWorkHours, '시간')
+        console.log('누적된 평일근무시간:', weekdayWorkHours, '시간')
       }
       
       // 근무 유형별 시간 계산
@@ -842,9 +890,9 @@ const workStats = computed(() => {
 const calculateShiftHours = (checkInTime: string | null, checkOutTime: string | null, breakTime: string | null, isHoliday: boolean = false, scheduledCheckIn: string | null = null, scheduledCheckOut: string | null = null) => {
   if (!checkInTime || !checkOutTime) return { early: 0, late: 0, day: 0 }
   
-  // 선택된 회사 ID 확인
+  // 선택된 회사 ID 확인 - 동적으로 판정
   const selectedCompany = store.companies.find(company => company.id === selectedCompanyId.value)
-  const isSpecialCompany = selectedCompany?.id === 'f41d81fc-2472-495e-ac0d-19e836dc613b'
+  const isSpecialCompany = selectedCompany?.is_special_company || false
 
   let adjustedCheckIn = checkInTime
   let adjustedCheckOut = checkOutTime
@@ -952,16 +1000,13 @@ const calculateShiftHours = (checkInTime: string | null, checkOutTime: string | 
     const nextMinute = Math.min(currentMinute + 30, workEndMinutes)
     const segmentMinutes = nextMinute - currentMinute
     
-    // 遅出이 日勤보다 우선순위가 높도록 순서 변경
+    // 각 시간대별로 분배
     if (minuteInDay >= lateStart && minuteInDay < lateEnd) {
-      // 遅出 시간대 (18:00~20:00)
-      lateShiftMinutes += segmentMinutes
+      lateShiftMinutes += segmentMinutes      // 遅出
     } else if (minuteInDay >= earlyStart && minuteInDay < earlyEnd) {
-      // 早出 시간대 (07:00~09:00)
-      earlyShiftMinutes += segmentMinutes
+      earlyShiftMinutes += segmentMinutes     // 早出
     } else if (minuteInDay >= dayStart && minuteInDay < dayEnd) {
-      // 日勤 시간대 (09:00~18:00)
-      dayShiftMinutes += segmentMinutes
+      dayShiftMinutes += segmentMinutes       // 日勤
     }
     
     currentMinute = nextMinute
@@ -972,13 +1017,24 @@ const calculateShiftHours = (checkInTime: string | null, checkOutTime: string | 
     dayShiftMinutes -= breakTimeMinutes
   }
   
-  // 휴일에 야간근무가 아닌 사람이 8시간 이상 근무한 경우 日勤을 8시간으로 고정
+  // 휴일에 야간근무가 아닌 사람이 8시간 이상 근무한 경우 日勤을 조정
   if (isHoliday && !isNightShift) {
     const totalWorkHours = (earlyShiftMinutes + lateShiftMinutes + dayShiftMinutes) / 60
     if (totalWorkHours >= 8) {
-      dayShiftMinutes = 8 * 60 // 8시간을 분으로 변환
-      earlyShiftMinutes = 0
-      lateShiftMinutes = 0
+      // 早出과 遅出은 그대로 유지하고, 日勤만 조정
+      const earlyLateHours = (earlyShiftMinutes + lateShiftMinutes) / 60
+      const remainingDayHours = Math.max(0, 8 - earlyLateHours)
+      dayShiftMinutes = remainingDayHours * 60
+      
+      console.log('=== 휴일 8시간 이상 근무 처리 ===')
+      console.log('총 근무시간:', totalWorkHours, '시간')
+      console.log('早出 + 遅出 시간:', earlyLateHours, '시간')
+      console.log('조정된 日勤 시간:', remainingDayHours, '시간')
+      console.log('최종 시간:', {
+        early: Math.max(0, earlyShiftMinutes / 60),
+        late: Math.max(0, lateShiftMinutes / 60),
+        day: Math.max(0, dayShiftMinutes / 60)
+      })
     }
   }
   
@@ -1152,11 +1208,284 @@ watch(endDate, (newEndDate) => {
 })
 
 // 회사 선택이 변경될 때 직원 선택 초기화
-watch(selectedCompanyId, (newCompanyId) => {
+watch(selectedCompanyId, () => {
   selectedEmployeeId.value = ''
   startDate.value = getDefaultStartDate()
   endDate.value = getDefaultEndDate()
 })
+
+// 엑셀다운로드 모달 관련 함수들
+const openExcelDownloadModal = () => {
+  // 현재 날짜 기준으로 기본 월 설정
+  const currentDate = new Date()
+  const currentMonth = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`
+  
+  excelDownloadForm.value = {
+    selectedMonth: currentMonth,
+    selectedCompanyId: '',
+    selectedFacilityId: ''
+  }
+  
+  excelDownloadStep.value = 1
+  showExcelDownloadModal.value = true
+}
+
+const closeExcelDownloadModal = () => {
+  showExcelDownloadModal.value = false
+  excelDownloadStep.value = 1
+  excelDownloadForm.value = {
+    selectedMonth: '',
+    selectedCompanyId: '',
+    selectedFacilityId: ''
+  }
+}
+
+const nextStep = () => {
+  if (excelDownloadStep.value < 3) {
+    excelDownloadStep.value++
+  }
+}
+
+const prevStep = () => {
+  if (excelDownloadStep.value > 1) {
+    excelDownloadStep.value--
+  }
+}
+
+const canProceedToNext = computed(() => {
+  switch (excelDownloadStep.value) {
+    case 1:
+      return !!excelDownloadForm.value.selectedMonth
+    case 2:
+      return !!excelDownloadForm.value.selectedCompanyId
+    case 3:
+      return !!excelDownloadForm.value.selectedFacilityId
+    default:
+      return false
+  }
+})
+
+// 선택된 회사의 시설 목록
+const availableFacilities = computed(() => {
+  if (!excelDownloadForm.value.selectedCompanyId) return []
+  
+  return store.getFacilitiesByCompany(excelDownloadForm.value.selectedCompanyId)
+})
+
+// 엑셀다운로드에서 회사 선택이 변경될 때 시설 선택 초기화
+watch(() => excelDownloadForm.value.selectedCompanyId, () => {
+  excelDownloadForm.value.selectedFacilityId = ''
+})
+
+
+
+// 엑셀 다운로드 함수
+const downloadExcel = async () => {
+  if (!excelDownloadForm.value.selectedFacilityId || !excelDownloadForm.value.selectedMonth) return
+  
+  downloadingExcel.value = true
+  
+  try {
+    // CSV 파일명 생성을 위한 년월 정보
+    const [year, month] = excelDownloadForm.value.selectedMonth.split('-')
+    
+    // 시설별 근무 통계 가져오기
+    const facilityStats = await store.getFacilityEmployeeWorkStats(
+      excelDownloadForm.value.selectedFacilityId,
+      excelDownloadForm.value.selectedMonth
+    )
+    
+    if (!facilityStats) {
+      throw new Error('근무 통계를 가져올 수 없습니다.')
+    }
+    
+    // 시설 정보 가져오기
+    const selectedFacility = store.facilities.find(f => f.id === excelDownloadForm.value.selectedFacilityId)
+    const selectedCompany = store.companies.find(c => c.id === excelDownloadForm.value.selectedCompanyId)
+    
+    // CSV 데이터 생성
+    console.log('Selected Company:', selectedCompany)
+    console.log('Company is_special_company:', selectedCompany?.is_special_company)
+    console.log('Company object keys:', selectedCompany ? Object.keys(selectedCompany) : 'No company')
+    console.log('Company full object:', JSON.stringify(selectedCompany, null, 2))
+    console.log('All companies:', store.companies)
+    console.log('All companies with is_special_company:', store.companies.map(c => ({ id: c.id, name: c.name, is_special_company: c.is_special_company })))
+    
+    const csvData = generateCSVData(facilityStats, selectedFacility, selectedCompany)
+    
+    // 파일 다운로드
+    downloadCSVFile(csvData, `${selectedCompany?.name}_${selectedFacility?.name}_${year}년${month}월_근무통계.csv`)
+    
+    // 성공 메시지
+    alert('エクセルファイルが正常にダウンロードされました。')
+    closeExcelDownloadModal()
+    
+  } catch (error) {
+    console.error('エクセルダウンロード中にエラーが発生しました:', error)
+    alert('エクセルダウンロードに失敗しました。')
+  } finally {
+    downloadingExcel.value = false
+  }
+}
+
+// CSV 데이터 생성 함수
+const generateCSVData = (stats: Awaited<ReturnType<typeof store.getFacilityEmployeeWorkStats>>, facility: { id: string; name: string } | undefined, company: { id: string; name: string; is_special_company?: boolean } | undefined) => {
+  if (!stats) return []
+  
+  const headers = company?.is_special_company
+    ? [
+        '従業員番号',
+        '従業員名',
+        '施設名',
+        '職種',
+        '給与形態',
+        '給与期間終了日',
+        '給与期間開始日',
+        '給与期間終了日',
+        '総勤務日数',
+        '総勤務時間',
+        '日勤勤務時間',
+        '夜勤勤務回数',
+        '夜勤勤務時間'
+      ]
+    : [
+        '従業員番号',
+        '従業員名',
+        '施設名',
+        '職種',
+        '給与形態',
+        '給与期間終了日',
+        '給与期間開始日',
+        '給与期間終了日',
+        '総勤務日数',
+        '総勤務時間',
+        '早出勤務時間',
+        '遅出勤務時間',
+        '日勤勤務時間',
+        '休日出勤時間',
+        '休日出勤+30円計算',
+        '夜勤勤務回数',
+        '夜勤勤務時間'
+      ]
+  
+  const rows = stats.employeeStats.map(employee => {
+    // 각 직원의 급여 기간에 맞춰 날짜 범위 계산
+    const [year, month] = excelDownloadForm.value.selectedMonth.split('-')
+    const payPeriodEndType = Number(employee.payPeriodEndType)
+    
+    let employeeStartDate: string
+    let employeeEndDate: string
+    
+    if (payPeriodEndType === 10) {
+      // 10일 종료: 이번달 11일 ~ 다음달 10일
+      if (month === '01') {
+        // 1월인 경우 전해 12월 11일부터
+        employeeStartDate = `${parseInt(year) - 1}-12-11`
+        employeeEndDate = `${year}-01-10`
+      } else {
+        // 이번달 11일부터 다음달 10일까지
+        const prevMonth = String(parseInt(month) - 1).padStart(2, '0')
+        const prevYear = month === '01' ? parseInt(year) - 1 : year
+        employeeStartDate = `${prevYear}-${prevMonth}-11`
+        employeeEndDate = `${year}-${month}-10`
+      }
+    } else {
+      // 20일 종료: 이번달 21일 ~ 다음달 20일
+      if (month === '01') {
+        // 1월인 경우 전해 12월 21일부터
+        employeeStartDate = `${parseInt(year) - 1}-12-21`
+        employeeEndDate = `${year}-${month}-20`
+      } else {
+        // 이번달 21일부터 다음달 20일까지
+        const prevMonth = String(parseInt(month) - 1).padStart(2, '0')
+        const prevYear = month === '01' ? parseInt(year) - 1 : year
+        employeeStartDate = `${prevYear}-${prevMonth}-21`
+        employeeEndDate = `${year}-${month}-20`
+      }
+    }
+    
+    if (company?.is_special_company) {
+      // 특별한 회사일 때 간소화된 데이터
+      console.log('=== 특별한 회사 직원 데이터 디버깅 ===')
+      console.log('직원:', employee.employeeName)
+      console.log('dayShiftHours:', employee.dayShiftHours)
+      console.log('totalWorkHours:', employee.totalWorkHours)
+      console.log('nightShiftHours:', employee.nightShiftHours)
+      console.log('nightShiftCount:', employee.nightShiftCount)
+      
+      return [
+        employee.employeeCode,
+        employee.employeeName,
+        employee.facilityName,
+        employee.category,
+        employee.salaryType === 'monthly' ? '日給月給制(正社員)' : employee.salaryType === 'hourly' ? '時給制(パート)' : '-',
+        `${employee.payPeriodEndType}日`,
+        employeeStartDate,
+        employeeEndDate,
+        String(employee.totalDays),           // 総勤務日数
+        String(employee.totalWorkHours),      // 総勤務時間
+        String(employee.dayShiftHours),       // 日勤勤務時間 (dayShiftHours 사용)
+        String(employee.nightShiftCount),    // 夜勤勤務回数
+        String(employee.nightShiftHours)     // 夜勤勤務時間
+      ]
+    } else {
+      // 일반 회사일 때 기존 데이터
+      return [
+        employee.employeeCode,
+        employee.employeeName,
+        employee.facilityName,
+        employee.category,
+        employee.salaryType === 'monthly' ? '日給月給制(正社員)' : employee.salaryType === 'hourly' ? '時給制(パート)' : '-',
+        `${employee.payPeriodEndType}日`,
+        employeeStartDate,
+        employeeEndDate,
+        String(employee.totalDays),
+        String(employee.totalWorkHours),
+        String(employee.earlyShiftHours),
+        String(employee.lateShiftHours),
+        String(employee.dayShiftHours),
+        String(employee.holidayWorkHours),
+        String(employee.holidayWorkHours * 30), // 休日出勤+30円計算
+        String(employee.nightShiftCount),
+        String(employee.nightShiftHours)
+      ]
+    }
+  })
+  
+  // 요약 정보를 맨 위에 추가
+  const summaryRows = [
+    ['', '', '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
+    ['=== サマリー情報 ===', '', '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
+    ['会社名', company?.name || '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
+    ['施設名', facility?.name || '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
+    ['選択月', excelDownloadForm.value.selectedMonth, '', '', '', '', '', '', '', '', '', '', '', '', ''],
+    ['総従業員数', String(stats.totalEmployees), '名', '', '', '', '', '', '', '', '', '', '', '', ''],
+    ['', '', '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
+    ['=== 従業員別詳細情報 ===', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '']
+  ]
+  
+  return [headers, ...summaryRows, ...rows]
+}
+
+// CSV 파일 다운로드 함수
+const downloadCSVFile = (csvData: string[][], filename: string) => {
+  const csvContent = csvData.map(row => 
+    row.map(cell => `"${cell}"`).join(',')
+  ).join('\n')
+  
+  const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' })
+  const link = document.createElement('a')
+  
+  if (link.download !== undefined) {
+    const url = URL.createObjectURL(blob)
+    link.setAttribute('href', url)
+    link.setAttribute('download', filename)
+    link.style.visibility = 'hidden'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+  }
+}
 </script>
 
 <template>
@@ -1178,6 +1507,37 @@ watch(selectedCompanyId, (newCompanyId) => {
     <!-- 에러 메시지 -->
     <div v-if="store.error" class="error-message">
       {{ store.error }}
+    </div>
+    
+    <!-- 어드민 섹션 -->
+    <div v-if="authStore.isAdmin" class="admin-section">
+      <div class="admin-section-header">
+        <span class="admin-icon">👑</span>
+        <h3>管理者機能</h3>
+        <button 
+          @click="showAdminSection = !showAdminSection"
+          class="admin-toggle-btn"
+          :class="{ 'expanded': showAdminSection }"
+        >
+          <span class="arrow-icon">{{ showAdminSection ? '▶' : '▼' }}</span>
+        </button>
+      </div>
+      
+      <!-- 어드민 섹션 내용 (토글 가능) -->
+      <div v-show="showAdminSection" class="admin-section-content">
+        <!-- 엑셀다운로드 버튼 -->
+        <div class="excel-download-section">
+          <button 
+            @click="openExcelDownloadModal"
+            class="excel-download-btn"
+          >
+            📊 エクセルダウンロード
+          </button>
+          <p class="excel-download-description">
+            選択した施設の全従業員勤務統計をエクセルファイルでダウンロードできます。
+          </p>
+        </div>
+      </div>
     </div>
     
     <!-- 직원 선택 및 기간 설정 -->
@@ -1740,6 +2100,131 @@ watch(selectedCompanyId, (newCompanyId) => {
         </div>
       </div>
     </div>
+
+    <!-- 엑셀다운로드 모달 -->
+    <div v-if="showExcelDownloadModal" class="modal-overlay" @click="closeExcelDownloadModal">
+      <div class="modal-content excel-download-modal" @click.stop>
+        <div class="modal-header">
+          <h3>エクセルダウンロード</h3>
+          <button @click="closeExcelDownloadModal" class="close-btn">×</button>
+        </div>
+        
+        <div class="modal-body">
+          <!-- 진행 단계 표시 -->
+          <div class="step-indicator">
+            <div class="step" :class="{ 'active': excelDownloadStep >= 1, 'completed': excelDownloadStep > 1 }">
+              <span class="step-number">1</span>
+              <span class="step-label">月選択</span>
+            </div>
+            <div class="step-line" :class="{ 'completed': excelDownloadStep > 1 }"></div>
+            <div class="step" :class="{ 'active': excelDownloadStep >= 2, 'completed': excelDownloadStep > 2 }">
+              <span class="step-number">2</span>
+              <span class="step-label">会社選択</span>
+            </div>
+            <div class="step-line" :class="{ 'completed': excelDownloadStep > 2 }"></div>
+            <div class="step" :class="{ 'active': excelDownloadStep >= 3, 'completed': excelDownloadStep > 2 }">
+              <span class="step-number">3</span>
+              <span class="step-label">施設選択</span>
+            </div>
+          </div>
+
+          <!-- 단계별 내용 -->
+          <div class="step-content">
+            <!-- 1단계: 월 선택 -->
+            <div v-if="excelDownloadStep === 1" class="step-panel">
+              <h4>ダウンロードする月を選択してください</h4>
+              <div class="form-group">
+                <label>月選択 <span class="required">*</span></label>
+                <input 
+                  type="month" 
+                  v-model="excelDownloadForm.selectedMonth"
+                  class="form-input"
+                  required
+                >
+              </div>
+            </div>
+
+            <!-- 2단계: 회사 선택 -->
+            <div v-if="excelDownloadStep === 2" class="step-panel">
+              <h4>会社を選択してください</h4>
+              <div class="form-group">
+                <label>会社選択 <span class="required">*</span></label>
+                <select 
+                  v-model="excelDownloadForm.selectedCompanyId"
+                  class="form-input"
+                  required
+                >
+                  <option value="">会社を選択してください</option>
+                  <option 
+                    v-for="company in store.companies" 
+                    :key="company.id" 
+                    :value="company.id"
+                  >
+                    {{ company.name }}
+                  </option>
+                </select>
+              </div>
+            </div>
+
+            <!-- 3단계: 시설 선택 -->
+            <div v-if="excelDownloadStep === 3" class="step-panel">
+              <h4>施設を選択してください</h4>
+              <div class="form-group">
+                <label>施設選択 <span class="required">*</span></label>
+                <select 
+                  v-model="excelDownloadForm.selectedFacilityId"
+                  class="form-input"
+                  required
+                >
+                  <option value="">施設を選択してください</option>
+                  <option 
+                    v-for="facility in availableFacilities" 
+                    :key="facility.id" 
+                    :value="facility.id"
+                  >
+                    {{ facility.name }}
+                  </option>
+                </select>
+              </div>
+              
+              <div class="download-info">
+                <p>選択した施設の<strong>個別従業員別</strong>勤務統計をエクセルファイルでダウンロードします。</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- 모달 하단 버튼 -->
+          <div class="modal-actions">
+            <button 
+              v-if="excelDownloadStep > 1"
+              @click="prevStep"
+              class="btn-secondary"
+            >
+              前へ
+            </button>
+            
+            <button 
+              v-if="excelDownloadStep < 3"
+              @click="nextStep"
+              :disabled="!canProceedToNext"
+              class="btn-primary"
+            >
+              次へ
+            </button>
+            
+            <div v-if="excelDownloadStep === 3">              
+              <button 
+                @click="downloadExcel"
+                :disabled="!canProceedToNext || downloadingExcel"
+                class="btn-primary download-btn"
+              >
+                {{ downloadingExcel ? 'ダウンロード中...' : '📊 エクセルダウンロード' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -1817,6 +2302,140 @@ watch(selectedCompanyId, (newCompanyId) => {
   font-size: 1.5rem;
   color: #7f8c8d;
   font-weight: 500;
+}
+
+.admin-section {
+  background: linear-gradient(135deg, rgba(52, 152, 219, 0.15), rgba(52, 152, 219, 0.08));
+  padding: 3rem;
+  border-radius: 20px;
+  box-shadow: 0 6px 25px rgba(0, 0, 0, 0.1);
+  margin-bottom: 3rem;
+  border: 3px solid #3498db;
+  position: relative;
+  overflow: hidden;
+  backdrop-filter: blur(10px);
+}
+
+.admin-section::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, #3498db, #2980b9, #3498db);
+}
+
+.admin-section::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.9);
+  z-index: -1;
+  border-radius: 20px;
+}
+
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.admin-section-header {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  margin-bottom: 2rem;
+  padding-bottom: 1.5rem;
+  border-bottom: 2px solid rgba(52, 152, 219, 0.2);
+}
+
+.admin-section-header h3 {
+  margin: 0;
+  color: #2c3e50;
+  font-size: 1.8rem;
+  font-weight: 600;
+  flex: 1;
+}
+
+.admin-toggle-btn {
+  background: #3498db;
+  color: white;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 500;
+}
+
+.admin-toggle-btn:hover {
+  background: #2980b9;
+  transform: translateY(-1px);
+}
+
+.admin-toggle-btn.expanded {
+  background: #2980b9;
+}
+
+.admin-section-content {
+  animation: slideDown 0.3s ease-out;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.admin-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: linear-gradient(135deg, #3498db, #2980b9);
+  color: white;
+  padding: 0.75rem 1.5rem;
+  border-radius: 25px;
+  font-weight: 600;
+  font-size: 1rem;
+  box-shadow: 0 4px 15px rgba(52, 152, 219, 0.3);
+}
+
+.admin-icon {
+  font-size: 1.2rem;
+}
+
+.admin-text {
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.excel-download-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.5rem;
+  text-align: center;
+}
+
+.excel-download-description {
+  color: #7f8c8d;
+  font-size: 1rem;
+  margin: 0;
+  max-width: 500px;
+  line-height: 1.5;
 }
 
 .control-section {
@@ -2822,5 +3441,247 @@ watch(selectedCompanyId, (newCompanyId) => {
   z-index: 2;
   background: #f8f9fa;
   box-shadow: 3px 0 6px -3px #eee;
+}
+
+.excel-download-btn {
+  background: linear-gradient(135deg, #27ae60, #2ecc71);
+  color: white;
+  border: none;
+  padding: 1rem 2rem;
+  border-radius: 12px;
+  font-size: 1.2rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 15px rgba(39, 174, 96, 0.3);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.excel-download-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(39, 174, 96, 0.4);
+}
+
+.excel-download-modal {
+  max-width: 700px;
+}
+
+.step-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 2rem;
+  gap: 1rem;
+}
+
+.step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  position: relative;
+}
+
+.step-number {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: #e0e0e0;
+  color: #7f8c8d;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 1.1rem;
+  transition: all 0.3s ease;
+}
+
+.step.active .step-number {
+  background: #3498db;
+  color: white;
+}
+
+.step.completed .step-number {
+  background: #27ae60;
+  color: white;
+}
+
+.step-label {
+  font-size: 0.9rem;
+  color: #7f8c8d;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.step.active .step-label {
+  color: #3498db;
+  font-weight: 600;
+}
+
+.step.completed .step-label {
+  color: #27ae60;
+  font-weight: 600;
+}
+
+.step-line {
+  width: 60px;
+  height: 3px;
+  background: #e0e0e0;
+  transition: background-color 0.3s ease;
+}
+
+.step-line.completed {
+  background: #27ae60;
+}
+
+.step-content {
+  min-height: 200px;
+  margin-bottom: 2rem;
+}
+
+.step-panel {
+  text-align: center;
+}
+
+.step-panel h4 {
+  margin: 0 0 1.5rem 0;
+  color: #2c3e50;
+  font-size: 1.3rem;
+  font-weight: 600;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 1.5rem;
+  border-top: 2px solid #e0e0e0;
+}
+
+.modal-actions .btn-secondary {
+  background: #95a5a6;
+  color: white;
+  border: none;
+  padding: 0.75rem 1.5rem;
+  border-radius: 6px;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+}
+
+.modal-actions .btn-secondary:hover {
+  background: #7f8c8d;
+}
+
+.modal-actions .btn-primary {
+  background: #3498db;
+  color: white;
+  border: none;
+  padding: 0.75rem 1.5rem;
+  border-radius: 6px;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+}
+
+.modal-actions .btn-primary:hover:not(:disabled) {
+  background: #2980b9;
+}
+
+.modal-actions .btn-primary:disabled {
+  background: #bdc3c7 !important;
+  cursor: not-allowed;
+}
+
+
+
+.final-actions {
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+  width: 85%;
+}
+
+.download-btn {
+  background: linear-gradient(135deg, #27ae60, #2ecc71) !important;
+  font-weight: 600;
+  padding: 0.75rem 2rem;
+}
+
+.download-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #229954, #27ae60) !important;
+  transform: translateY(-1px);
+}
+
+.download-btn:disabled {
+  background: #bdc3c7 !important;
+  transform: none;
+}
+
+.download-info {
+  margin-top: 2rem;
+  padding: 1.5rem;
+  background: #f8f9fa;
+  border-radius: 8px;
+  border: 1px solid #e0e0e0;
+}
+
+.download-info p {
+  margin: 0 0 1rem 0;
+  color: #2c3e50;
+  font-weight: 500;
+}
+
+.download-info ul {
+  margin: 0;
+  padding-left: 1.5rem;
+  color: #7f8c8d;
+}
+
+.download-info li {
+  margin-bottom: 0.5rem;
+}
+
+.admin-toggle-btn {
+  background: #3498db;
+  color: white;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: background-color 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.admin-toggle-btn:hover {
+  background: #2980b9;
+}
+
+.admin-toggle-btn.expanded {
+  background: #2980b9;
+}
+
+.arrow-icon {
+  font-size: 1.2rem;
+  transition: transform 0.3s ease;
+  display: inline-block;
+}
+
+.admin-toggle-btn.expanded .arrow-icon {
+  transform: rotate(90deg);
+}
+
+.admin-toggle-btn:hover {
+  background: #2980b9;
+  transform: translateY(-1px);
+}
+
+.admin-toggle-btn.expanded:hover {
+  transform: translateY(-1px);
 }
 </style> 

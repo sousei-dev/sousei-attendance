@@ -98,6 +98,13 @@ export interface Company {
   name: string
   created_at: string
   note: string
+  is_special_company?: boolean
+}
+
+export interface CompanyFacility {
+  id: string
+  company_id: string
+  facility_id: string
 }
 
 export interface Database {
@@ -122,6 +129,16 @@ export interface Database {
         Row: Facility
         Insert: Omit<Facility, 'created_at' | 'updated_at'>
         Update: Partial<Omit<Facility, 'created_at' | 'updated_at'>>
+      }
+      companies: {
+        Row: Company
+        Insert: Omit<Company, 'id' | 'created_at'>
+        Update: Partial<Omit<Company, 'id' | 'created_at'>>
+      }
+      company_facilities: {
+        Row: CompanyFacility
+        Insert: Omit<CompanyFacility, 'id'>
+        Update: Partial<Omit<CompanyFacility, 'id'>>
       }
     }
   }
