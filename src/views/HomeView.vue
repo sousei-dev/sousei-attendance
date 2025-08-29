@@ -214,6 +214,49 @@ const employeeRecords = computed(() => {
   return records
 })
 
+// 전날 출근하고 퇴근하지 않은 직원 확인
+const hasUnfinishedYesterdayWork = computed(() => {
+  if (!selectedEmployeeForModal.value) return false
+  
+  const employeeId = selectedEmployeeForModal.value.id
+  const yesterday = new Date()
+  yesterday.setDate(yesterday.getDate() - 1)
+  const year = yesterday.getFullYear()
+  const month = String(yesterday.getMonth() + 1).padStart(2, '0')
+  const day = String(yesterday.getDate()).padStart(2, '0')
+  const yesterdayDate = `${year}-${month}-${day}`
+  
+  const yesterdayRecord = store.getEmployeeRecord(employeeId, yesterdayDate)
+  
+  // 전날 출근했지만 퇴근하지 않은 경우 (야간근무 제외)
+  return yesterdayRecord && yesterdayRecord.check_in && !yesterdayRecord.check_out && !yesterdayRecord.is_night_shift
+})
+
+// 전날 미퇴근 정보 가져오기
+const getYesterdayWorkInfo = computed(() => {
+  if (!selectedEmployeeForModal.value || !hasUnfinishedYesterdayWork.value) return null
+  
+  const employeeId = selectedEmployeeForModal.value.id
+  const yesterday = new Date()
+  yesterday.setDate(yesterday.getDate() - 1)
+  const year = yesterday.getFullYear()
+  const month = String(yesterday.getMonth() + 1).padStart(2, '0')
+  const day = String(yesterday.getDate()).padStart(2, '0')
+  const yesterdayDate = `${year}-${month}-${day}`
+  
+  const yesterdayRecord = store.getEmployeeRecord(employeeId, yesterdayDate)
+  
+  if (yesterdayRecord) {
+    return {
+      date: yesterdayDate,
+      checkIn: yesterdayRecord.check_in,
+      isNightShift: yesterdayRecord.is_night_shift
+    }
+  }
+  
+  return null
+})
+
 // 직원의 출퇴근 기록 가져오기 (야간 근무 고려, 캐시 사용)
 const getEmployeeRecordForDisplay = (employeeId: string) => {
   return employeeRecords.value[employeeId]
@@ -745,7 +788,21 @@ const closeEmployeeModal = () => {
               <span class="employee-code">{{ selectedEmployeeForModal.employee_code }}</span>
               <span class="employee-name">{{ selectedEmployeeForModal.last_name }}{{ selectedEmployeeForModal.first_name }}</span>
             </div>
+            
+            <!-- 전날 미퇴근 알림 -->
+            <div v-if="hasUnfinishedYesterdayWork" class="yesterday-work-alert">
+              <div class="alert-icon">⚠️</div>
+              <div class="alert-content">
+                <div class="alert-title">前日の未退勤</div>
+                <div class="alert-details">
+                  <span class="alert-date">{{ getYesterdayWorkInfo?.date }}</span>
+                  <span class="alert-time">出勤: {{ getYesterdayWorkInfo?.checkIn }}</span>
+                  <span v-if="getYesterdayWorkInfo?.isNightShift" class="alert-shift">夜勤</span>
+                </div>
+              </div>
+            </div>
           </div>
+          
           <div class="modal-main-section">
             <div class="modal-left-section">
               <div class="shift-type-buttons">
@@ -1536,6 +1593,27 @@ const closeEmployeeModal = () => {
     width: 100%;
     justify-content: flex-start;
   }
+
+  /* 모바일에서 전날 미퇴근 알림 스타일 조정 */
+  .employee-header {
+    flex-direction: column;
+    gap: 1.5rem;
+    align-items: stretch;
+  }
+
+  .yesterday-work-alert {
+    flex-direction: column;
+    text-align: center;
+    gap: 1rem;
+    max-width: none;
+    min-height: auto;
+  }
+
+  .alert-details {
+    flex-direction: column;
+    gap: 0.5rem;
+    align-items: center;
+  }
 }
 
 @media (max-width: 480px) {
@@ -1838,6 +1916,9 @@ const closeEmployeeModal = () => {
 .employee-header {
   border-bottom: 2px solid #ecf0f1;
   padding-bottom: 1.5rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 
 .employee-basic-info {
@@ -1860,6 +1941,75 @@ const closeEmployeeModal = () => {
   font-size: 1.8rem;
   font-weight: 700;
   color: #2c3e50;
+}
+
+/* 전날 미퇴근 알림 스타일 */
+.yesterday-work-alert {
+  background: #fff3cd;
+  border: 2px solid #ffc107;
+  border-radius: 12px;
+  padding: 1rem 1.5rem;
+  box-shadow: 0 4px 15px rgba(255, 193, 7, 0.2);
+  animation: alertPulse 2s infinite;
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  min-height: 60px;
+  max-width: 400px;
+}
+
+.alert-icon {
+  font-size: 2rem;
+  flex-shrink: 0;
+}
+
+.alert-content {
+  flex: 1;
+}
+
+.alert-title {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: #856404;
+  margin-bottom: 0.8rem;
+}
+
+.alert-details {
+  display: flex;
+  gap: 1.5rem;
+  font-size: 1rem;
+  color: #856404;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.alert-date {
+  font-weight: 600;
+}
+
+.alert-time {
+  font-weight: 500;
+}
+
+.alert-shift {
+  background: #856404;
+  color: white;
+  padding: 0.3rem 0.8rem;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  display: inline-block;
+}
+
+@keyframes alertPulse {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 4px 15px rgba(255, 193, 7, 0.2);
+  }
+  50% {
+    transform: scale(1.02);
+    box-shadow: 0 6px 20px rgba(255, 193, 7, 0.3);
+  }
 }
 
 .shift-type-buttons {
