@@ -299,14 +299,6 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
         const minutes = parseInt(timeParts[1], 10)
         const scheduledMinutes = hours * 60 + minutes
         
-        console.log('=== 야간 근무 디버깅 ===')
-        console.log('scheduledCheckIn:', scheduledCheckIn)
-        console.log('scheduledMinutes:', scheduledMinutes)
-        console.log('16:30 분:', 16 * 60 + 30)
-        console.log('09:30분:', 9 * 60 + 30)
-        console.log('조건1 (>= 16:30, scheduledMinutes >= 16 * 60 + 30):', scheduledMinutes >= 16 * 60 + 30)
-        console.log('조건2 (<= 09:30, scheduledMinutes <= 9 * 60 + 30):', scheduledMinutes <= 9 * 60 + 30)
-        
         // 야간 근무 판단: 예상 출근시간이 16:30이고 예상 퇴근시간이 09:30인 경우
         const nineThirtyMinutes = 9 * 60 + 30  // 09:30
         const sixteenThirtyMinutes = 16 * 60 + 30  // 16:30
@@ -323,22 +315,11 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
           // 퇴근시간이 없으면 출근시간만으로 판단
           isNightShift = scheduledMinutes === sixteenThirtyMinutes
         }
-        console.log('isNightShift:', isNightShift)
-        console.log('=== 야간 근무 디버깅 끝 ===')
       } else {
         // 예상 출근시간이 없으면 실제 출근시간 기준
         const currentMinutes = now.getHours() * 60 + now.getMinutes()
         isNightShift = currentMinutes >= 16 * 60 || currentMinutes < 6 * 60 //16:30또는 6
       }
-
-      // 출근 시점의 정확한 날짜 사용 (UTC 기준)
-      const actualWorkDate = now.toISOString().split('T')[0]
-      
-      console.log('=== 출근 날짜 디버깅 ===')
-      console.log('현재 시간:', now)
-      console.log('currentDate.value:', currentDate.value)
-      console.log('actualWorkDate:', actualWorkDate)
-      console.log('=== 출근 날짜 디버깅 끝 ===')
 
       // 출근 시간 기준으로 상태 결정
       let status: 'present' | 'late' = 'present'
@@ -726,6 +707,29 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
       return company?.is_special_company || false
     })
     
+    // 휴가 기록 로드
+    const loadVacationRecords = async () => {
+      try {
+        const { data, error: supabaseError } = await supabase
+          .from('vacation_records')
+          .select('*')
+          .order('start_date', { ascending: false })
+        
+        if (supabaseError) {
+          console.error('휴가 기록 로드 실패:', supabaseError)
+          return []
+        }
+        
+        return data || []
+      } catch (err) {
+        console.error('휴가 기록 로드 중 오류 발생:', err)
+        return []
+      }
+    }
+    
+    // 휴가 기록 가져오기
+    const vacationRecords = await loadVacationRecords()
+    
     // 공휴일 데이터 가져오기
     const holidays: string[] = []
     const fetchHolidays = async (year: number) => {
@@ -791,7 +795,6 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
       holidays.length = 0
       holidays.push(...uniqueHolidays)
       
-      console.log('로드된 공휴일:', holidays)
     }
     
     // 공휴일 데이터를 동기적으로 로드
@@ -1132,16 +1135,6 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
             const earlyLateHours = (earlyShiftMinutes + lateShiftMinutes) / 60
             const remainingDayHours = Math.max(0, 8 - earlyLateHours)
             dayShiftMinutes = remainingDayHours * 60
-            
-            console.log('=== 휴일 8시간 이상 근무 처리 ===')
-            console.log('총 근무시간:', totalWorkHours, '시간')
-            console.log('早出 + 遅出 시간:', earlyLateHours, '시간')
-            console.log('조정된 日勤 시간:', remainingDayHours, '시간')
-            console.log('최종 시간:', {
-              early: Math.max(0, earlyShiftMinutes / 60),
-              late: Math.max(0, lateShiftMinutes / 60),
-              day: Math.max(0, dayShiftMinutes / 60)
-            })
           }
         }
         
@@ -1155,32 +1148,12 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
       employeeRecords.forEach(record => {
         if (record.check_in && record.check_out) {
           const isHolidayWork = isHoliday(record.date)
-          
-          // 특정 직원 디버깅
-          if (employee.id === '2005d812-6ab5-4f95-8ae2-5d6a0a116754') {
-            console.log('=== 특정 직원 디버깅 ===')
-            console.log('직원 ID:', employee.id)
-            console.log('직원명:', `${employee.last_name}${employee.first_name}`)
-            console.log('근무일:', record.date)
-            console.log('출근시간:', record.check_in)
-            console.log('퇴근시간:', record.check_out)
-            console.log('예상출근:', record.scheduled_check_in)
-            console.log('예상퇴근:', record.scheduled_check_out)
-            console.log('휴식시간:', record.break_time)
-            console.log('휴일근무여부:', isHolidayWork)
-            console.log('특별한회사여부:', isSpecialCompany)
-          }
-          
+
           // 야간근무 여부 확인 (16:30 ~ 다음날 09:30) - 예상 출퇴근시간 기준
           const isNightShift = isNightShiftWork(record.check_in, record.check_out, record.scheduled_check_in, record.scheduled_check_out)
           if (isNightShift) {
             nightShiftCount++
             nightShiftHours += 14 // 야간근무는 14시간으로 고정
-            
-            // 특정 직원 디버깅
-            if (employee.id === '2005d812-6ab5-4f95-8ae2-5d6a0a116754') {
-              console.log('야간근무로 판정됨')
-            }
           }
           
           // 야간근무가 아닌 경우에만 일반 근무시간 계산
@@ -1207,31 +1180,12 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
             earlyShiftHours += shiftHours.early
             lateShiftHours += shiftHours.late
             dayShiftHours += shiftHours.day
-            
-            // 특정 직원 디버깅
-            if (employee.id === '2005d812-6ab5-4f95-8ae2-5d6a0a116754') {
-              console.log('일반근무 계산:')
-              console.log('- 실제근무시간:', actualWorkHours)
-              console.log('- 휴식시간(시간):', breakTimeHoursForRecord)
-              console.log('- 순근무시간:', netWorkHours)
-              console.log('- 근무유형별 시간:', shiftHours)
-              console.log('- 누적된 시간:', {
-                earlyShiftHours,
-                lateShiftHours,
-                dayShiftHours
-              })
-            }
-            
+                        
             if (isHolidayWork) {
               // 특별한 회사의 경우 휴일출근시간 계산하지 않음
               if (isSpecialCompany) {
                 // 휴일출근시간을 계산하지 않고 평일 근무시간에 포함
                 weekdayWorkHours += netWorkHours
-                
-                // 특정 직원 디버깅
-                if (employee.id === '2005d812-6ab5-4f95-8ae2-5d6a0a116754') {
-                  console.log('특별한회사 휴일근무 - 평일근무시간에 포함:', netWorkHours)
-                }
               } else {
                 // 일반 회사: 이미 계산된 日勤勤務시간을 휴일출근시간으로 사용
                 const dayShiftHoursForHoliday = shiftHours.day
@@ -1239,27 +1193,11 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
                 if (dayShiftHoursForHoliday > 0) {
                   holidayWorkHours += dayShiftHoursForHoliday
                   
-                  // 특정 직원 디버깅
-                  if (employee.id === '2005d812-6ab5-4f95-8ae2-5d6a0a116754') {
-                    console.log('일반회사 휴일근무 계산:')
-                    console.log('- 출근시간:', record.check_in)
-                    console.log('- 퇴근시간:', record.check_out)
-                    console.log('- 예상출근:', record.scheduled_check_in)
-                    console.log('- 예상퇴근:', record.scheduled_check_out)
-                    console.log('- 휴게시간:', record.break_time)
-                    console.log('- 日勤勤務時間:', dayShiftHoursForHoliday, '시간')
-                    console.log('- 휴일출근시간:', dayShiftHoursForHoliday, '시간')
-                  }
                 }
               }
             } else {
               // 평일 근무시간 (휴일이 아닌 경우)
               weekdayWorkHours += netWorkHours
-              
-              // 특정 직원 디버깅
-              if (employee.id === '2005d812-6ab5-4f95-8ae2-5d6a0a116754') {
-                console.log('평일근무 - 평일근무시간에 포함:', netWorkHours)
-              }
             }
             
             // 총 근무시간 누적 (야간근무 제외)
@@ -1274,17 +1212,45 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
       // 야간근무 시간을 총 근무시간에 추가
       totalWorkHours += nightShiftHours
       
-      // 특정 직원 최종 결과 디버깅
-      if (employee.id === '2005d812-6ab5-4f95-8ae2-5d6a0a116754') {
-        console.log('=== 특정 직원 최종 결과 ===')
-        console.log('총 근무시간:', totalWorkHours)
-        console.log('휴일 근무시간:', holidayWorkHours)
-        console.log('평일 근무시간:', weekdayWorkHours)
-        console.log('일근 시간 (日勤勤務時間):', dayShiftHours)
-        console.log('야간근무 횟수:', nightShiftCount)
-        console.log('야간근무 시간:', nightShiftHours)
-        console.log('총 근무일수:', totalWorkDays)
-      }
+      // 휴가 통계 계산
+      let paidLeaveDays = 0 // 유급휴가 일수
+      let specialLeaveDays = 0 // 특별휴가 일수
+      
+      vacationRecords.forEach(vacation => {
+        if (vacation.employee_id === employee.id) {
+          const vacationStart = new Date(vacation.start_date)
+          const vacationEnd = new Date(vacation.end_date)
+          const periodStart = new Date(employeeStartDate)
+          const periodEnd = new Date(employeeEndDate)
+          
+          // 급여 기간과 겹치는 부분이 있는지 확인
+          if (vacationStart <= periodEnd && vacationEnd >= periodStart) {
+            // 겹치는 기간의 시작일과 종료일 계산
+            const overlapStart = new Date(Math.max(vacationStart.getTime(), periodStart.getTime()))
+            const overlapEnd = new Date(Math.min(vacationEnd.getTime(), periodEnd.getTime()))
+            
+            // 겹치는 기간이 있는 경우에만 계산
+            if (overlapStart <= overlapEnd) {
+              // 겹치는 기간의 일수 계산
+              const timeDiff = overlapEnd.getTime() - overlapStart.getTime()
+              const overlapDays = Math.ceil(timeDiff / (1000 * 3600 * 24)) + 1 // 시작일 포함
+              
+              if (vacation.category === 'PAID_LEAVE') {
+                // 유급휴가는 duration으로 계산 (0.5일 반차 포함)
+                if (vacation.duration) {
+                  paidLeaveDays += vacation.duration
+                } else {
+                  // duration이 없는 경우 겹치는 일수로 계산
+                  paidLeaveDays += overlapDays
+                }
+              } else if (vacation.category === 'SPECIAL_LEAVE') {
+                // 특별휴가는 겹치는 일수로 계산
+                specialLeaveDays += overlapDays
+              }
+            }
+          }
+        }
+      })
       
       return {
         employeeId: employee.id,
@@ -1306,7 +1272,9 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
         nightShiftCount,
         nightShiftHours: Math.round(nightShiftHours * 100) / 100, // 야간근무 시간 추가
         facilityId: employee.facility_id || '',
-        isSpecialCompany
+        isSpecialCompany,
+        paidLeaveDays: Math.round(paidLeaveDays * 100) / 100, // 유급휴가 일수
+        specialLeaveDays: Math.round(specialLeaveDays * 100) / 100 // 특별휴가 일수
       }
     })
     

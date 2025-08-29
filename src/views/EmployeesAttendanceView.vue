@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useSupabaseAttendanceStore } from '../stores/supabaseAttendance'
 import { useAuthStore } from '../stores/auth'
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import type { AttendanceRecord } from '../lib/supabase'
 import { useRoute } from 'vue-router'
 
@@ -90,6 +90,17 @@ const registrationRequestForm = ref({
 })
 const submittingRegistrationRequest = ref(false)
 
+// 휴가 등록 관련 상태
+const showVacationRequestModal = ref(false)
+const vacationRequestForm = ref({
+  vacation_type: '',
+  vacation_subtype: '',
+  start_date: '',
+  end_date: '',
+  memo: ''
+})
+const submittingVacationRequest = ref(false)
+
 // 요청 상태 관련 상태
 const changeRequests = ref<{
   id: string
@@ -107,6 +118,21 @@ const changeRequests = ref<{
   created_at: string
 }[]>([])
 const loadingRequests = ref(false)
+
+// 휴가 기록 관련 상태
+const vacationRecords = ref<{
+  id: string
+  employee_id: string
+  start_date: string
+  end_date: string
+  category: string
+  sub_type: string | null
+  duration: number
+  note: string | null
+  created_at: string
+  updated_at: string
+}[]>([])
+const loadingVacationRecords = ref(false)
 
 // 엑셀다운로드 관련 상태
 const showExcelDownloadModal = ref(false)
@@ -507,6 +533,8 @@ const getRequestTypeText = (requestType: string) => {
       return '修正要請'
     case 'cancel':
       return '取消要請'
+    case 'vacation':
+      return '有休登録要請'
     default:
       return requestType
   }
@@ -536,6 +564,41 @@ const hasExistingRecord = (date: string) => {
   )
 }
 
+// 특정 날짜에 이미 휴가가 있는지 확인
+const hasExistingVacation = (startDate: string, endDate: string) => {
+  if (!selectedEmployee.value) return false
+  
+  const start = new Date(startDate)
+  const end = new Date(endDate)
+  
+  return vacationRecords.value.some(vacation => {
+    const vacationStart = new Date(vacation.start_date)
+    const vacationEnd = new Date(vacation.end_date)
+    
+    // 날짜 범위가 겹치는지 확인
+    return (start <= vacationEnd && end >= vacationStart)
+  })
+}
+
+// 특정 날짜에 출근기록이나 휴가가 있는지 확인
+const hasExistingRecordOrVacation = (startDate: string, endDate: string) => {
+  const start = new Date(startDate)
+  const end = new Date(endDate)
+  
+  // 휴가 기간의 모든 날짜를 순회
+  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+    const currentDate = d.toISOString().split('T')[0]
+    
+    // 출근기록이 있는지 확인
+    if (hasExistingRecord(currentDate)) {
+      return true
+    }
+  }
+  
+  // 휴가 기록이 있는지 확인
+  return hasExistingVacation(startDate, endDate)
+}
+
 // 특정 날짜에 이미 요청이 있는지 확인
 const hasExistingRequest = (date: string) => {
   return changeRequests.value.some(request => 
@@ -555,6 +618,49 @@ const selectedPeriodRecords = computed(() => {
   ).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
 })
 
+// 선택된 기간의 통합 기록 (근무 + 휴가)
+const selectedPeriodIntegratedRecords = computed(() => {
+  if (!selectedEmployeeId.value) return []
+  
+  const records: Array<{
+    type: 'attendance' | 'vacation'
+    data: AttendanceRecord | VacationRecord
+    date: string
+  }> = []
+  
+  // 근무 기록 추가
+  selectedPeriodRecords.value.forEach(record => {
+    records.push({
+      type: 'attendance',
+      data: record,
+      date: record.date
+    })
+  })
+  
+  // 휴가 기록 추가 - 기간의 모든 날짜를 개별적으로 추가
+  vacationRecords.value.forEach(vacation => {
+    const vacationStartDate = new Date(vacation.start_date)
+    const vacationEndDate = new Date(vacation.end_date)
+    
+    // 휴가 기간의 모든 날짜를 순회
+    for (let d = new Date(vacationStartDate); d <= vacationEndDate; d.setDate(d.getDate() + 1)) {
+      const currentDate = d.toISOString().split('T')[0]
+      
+      // 선택된 기간 내의 날짜만 필터링
+      if (currentDate >= startDate.value && currentDate <= endDate.value) {
+        records.push({
+          type: 'vacation',
+          data: vacation,
+          date: currentDate
+        })
+      }
+    }
+  })
+  
+  // 날짜 순서대로 정렬
+  return records.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+})
+
 // 선택된 직원 정보
 const selectedEmployee = computed(() => {
   return store.getEmployeeById(selectedEmployeeId.value)
@@ -563,9 +669,13 @@ const selectedEmployee = computed(() => {
 // 직원이 변경될 때 요청 목록 로드
 watch(() => selectedEmployee.value, async (newEmployee) => {
   if (newEmployee) {
-    await loadChangeRequests()
+    await Promise.all([
+      loadChangeRequests(),
+      loadVacationRecords()
+    ])
   } else {
     changeRequests.value = []
+    vacationRecords.value = []
   }
 })
 
@@ -575,16 +685,7 @@ const isHoliday = (dateString: string) => {
   const dayOfWeek = date.getDay()
   const isWeekend = dayOfWeek === 0 // 원래 로직: 일요일만 휴일
   const isPublicHoliday = holidays.value.includes(dateString)
-  
-  // 디버깅 로그 추가
-  console.log('=== 휴일 판정 ===')
-  console.log('날짜:', dateString)
-  console.log('요일:', ['일', '월', '화', '수', '목', '금', '토'][dayOfWeek])
-  console.log('요일 숫자:', dayOfWeek)
-  console.log('주말 여부:', isWeekend)
-  console.log('공휴일 여부:', isPublicHoliday)
-  console.log('최종 휴일 여부:', isWeekend || isPublicHoliday)
-  
+    
   return isWeekend || isPublicHoliday
 }
 
@@ -745,7 +846,7 @@ const calculateNetWorkHours = (checkInTime: string | null, checkOutTime: string 
   return finalHours
 }
 
-// 근무 통계 계산
+// 근무 통계 계산 (근무 기록만 사용)
 const workStats = computed(() => {
   const records = selectedPeriodRecords.value
   let holidayWorkHours = 0 // 휴일 근무시간
@@ -794,26 +895,15 @@ const workStats = computed(() => {
           // 휴일출근시간을 계산하지 않고 평일 근무시간에 포함
           weekdayWorkHours += netWorkHours
           
-          // 디버깅 로그 추가
-          console.log('=== 특별한 회사 휴일근무 ===')
-          console.log('날짜:', record.date)
-          console.log('출근시간:', record.check_in)
-          console.log('퇴근시간:', record.check_out)
-          console.log('예상출근:', record.scheduled_check_in)
-          console.log('예상퇴근:', record.scheduled_check_out)
-          console.log('휴식시간:', record.break_time)
-          console.log('순근무시간:', netWorkHours)
-          console.log('평일근무시간에 포함됨')
-          console.log('누적된 평일근무시간:', weekdayWorkHours)
         } else {
           // 기존 로직 (일반 회사)
           // 야간근무가 아닌 경우 09:00~18:00 사이의 근무만 휴일출근시간으로 인정
           if (!record.is_night_shift) {
             
-            // calculateShiftHours 함수를 사용해서 정확한 日勤勤務시간 계산
+            // calculateShiftHours 함수를 사용해서 정확한 日勤勤務時間 계산
             const shiftHours = calculateShiftHours(record.check_in, record.check_out, record.break_time, isHoliday(record.date), record.scheduled_check_in, record.scheduled_check_out)
             
-            // 日勤勤務시간만 휴일출근시간으로 계산
+            // 日勤勤務時間만 휴일출근시간으로 계산
             const dayShiftHoursForHoliday = shiftHours.day
             
             if (dayShiftHoursForHoliday > 0) {
@@ -822,42 +912,18 @@ const workStats = computed(() => {
               // 제외된 시간 계산 (전체 근무시간 - 인정된 근무시간)
               const excludedHours = netWorkHours - dayShiftHoursForHoliday
               holidayExcludedHours += Math.max(0, excludedHours)
-              
-              console.log('=== 일반 회사 휴일근무 계산 ===')
-              console.log('날짜:', record.date)
-              console.log('출근시간:', record.check_in)
-              console.log('퇴근시간:', record.check_out)
-              console.log('예상출근:', record.scheduled_check_in)
-              console.log('예상퇴근:', record.scheduled_check_out)
-              console.log('휴게시간:', record.break_time)
-              console.log('日勤勤務時間:', dayShiftHoursForHoliday, '시간')
-              console.log('휴일출근시간:', dayShiftHoursForHoliday, '시간')
-              console.log('- 제외된 시간:', excludedHours, '시간')
-              console.log('- 누적된 휴일출근시간:', holidayWorkHours, '시간')
-              console.log('- 누적된 제외시간:', holidayExcludedHours, '시간')
             } else {
               // 日勤勤務시간이 없는 경우 모두 제외
               holidayExcludedHours += netWorkHours
-              console.log('日勤勤務시간이 없음 - 모두 제외됨')
-              console.log('- 제외된 시간:', netWorkHours, '시간')
-              console.log('- 누적된 제외시간:', holidayExcludedHours, '시간')
             }
           } else {
             // 야간근무는 휴일 근무로 계산하지 않고 평일 근무시간에 포함
             weekdayWorkHours += netWorkHours
-            console.log('야간근무 휴일근무 - 휴일 근무로 계산하지 않음, 평일 근무시간에 포함')
-            console.log('- 평일근무시간에 포함:', netWorkHours, '시간')
-            console.log('- 누적된 평일근무시간:', weekdayWorkHours, '시간')
           }
         }
       } else {
         // 평일 근무시간 (휴일이 아닌 경우)
         weekdayWorkHours += netWorkHours
-        
-        console.log('=== 평일근무 ===')
-        console.log('날짜:', record.date)
-        console.log('순근무시간:', netWorkHours, '시간')
-        console.log('누적된 평일근무시간:', weekdayWorkHours, '시간')
       }
       
       // 근무 유형별 시간 계산
@@ -865,6 +931,35 @@ const workStats = computed(() => {
       earlyShiftHours += shiftHours.early
       lateShiftHours += shiftHours.late
       dayShiftHours += shiftHours.day
+    }
+  })
+
+  // 휴가 통계 계산
+  let paidLeaveDays = 0 // 유급휴가 일수
+  let specialLeaveDays = 0 // 특별휴가 일수
+  
+  vacationRecords.value.forEach(vacation => {    
+    if (vacation.category === 'PAID_LEAVE') {
+      // PAID_LEAVE는 무조건 포함된 데이터이므로 duration으로 계산
+      paidLeaveDays += vacation.duration
+    } else if (vacation.category === 'SPECIAL_LEAVE') {
+      // SPECIAL_LEAVE만 선택된 기간과 겹치는 부분 계산
+      const vacationStart = new Date(vacation.start_date)
+      const vacationEnd = new Date(vacation.end_date)
+      const selectedStart = new Date(startDate.value)
+      const selectedEnd = new Date(endDate.value)
+      
+      // 겹치는 기간의 시작일과 종료일 계산
+      const overlapStart = new Date(Math.max(vacationStart.getTime(), selectedStart.getTime()))
+      const overlapEnd = new Date(Math.min(vacationEnd.getTime(), selectedEnd.getTime()))
+      
+      // 겹치는 기간이 있는 경우에만 계산
+      if (overlapStart <= overlapEnd) {
+        // 겹치는 기간의 일수 계산
+        const timeDiff = overlapEnd.getTime() - overlapStart.getTime()
+        const overlapDays = Math.ceil(timeDiff / (1000 * 3600 * 24)) + 1 // 시작일 포함
+        specialLeaveDays += overlapDays
+      }
     }
   })
 
@@ -882,7 +977,9 @@ const workStats = computed(() => {
     dayShiftHours: Math.round(dayShiftHours * 100) / 100,
     totalDays: totalWorkDays,
     nightShiftCount, // 야근근무 횟수 추가
-    isSpecialCompany // 특별한 회사 여부 추가
+    isSpecialCompany, // 특별한 회사 여부 추가
+    paidLeaveDays: Math.round(paidLeaveDays * 100) / 100, // 유급휴가 일수
+    specialLeaveDays: Math.round(specialLeaveDays * 100) / 100 // 특별휴가 일수
   }
 })
 
@@ -1025,16 +1122,6 @@ const calculateShiftHours = (checkInTime: string | null, checkOutTime: string | 
       const earlyLateHours = (earlyShiftMinutes + lateShiftMinutes) / 60
       const remainingDayHours = Math.max(0, 8 - earlyLateHours)
       dayShiftMinutes = remainingDayHours * 60
-      
-      console.log('=== 휴일 8시간 이상 근무 처리 ===')
-      console.log('총 근무시간:', totalWorkHours, '시간')
-      console.log('早出 + 遅出 시간:', earlyLateHours, '시간')
-      console.log('조정된 日勤 시간:', remainingDayHours, '시간')
-      console.log('최종 시간:', {
-        early: Math.max(0, earlyShiftMinutes / 60),
-        late: Math.max(0, lateShiftMinutes / 60),
-        day: Math.max(0, dayShiftMinutes / 60)
-      })
     }
   }
   
@@ -1304,13 +1391,6 @@ const downloadExcel = async () => {
     const selectedCompany = store.companies.find(c => c.id === excelDownloadForm.value.selectedCompanyId)
     
     // CSV 데이터 생성
-    console.log('Selected Company:', selectedCompany)
-    console.log('Company is_special_company:', selectedCompany?.is_special_company)
-    console.log('Company object keys:', selectedCompany ? Object.keys(selectedCompany) : 'No company')
-    console.log('Company full object:', JSON.stringify(selectedCompany, null, 2))
-    console.log('All companies:', store.companies)
-    console.log('All companies with is_special_company:', store.companies.map(c => ({ id: c.id, name: c.name, is_special_company: c.is_special_company })))
-    
     const csvData = generateCSVData(facilityStats, selectedFacility, selectedCompany)
     
     // 파일 다운로드
@@ -1346,7 +1426,9 @@ const generateCSVData = (stats: Awaited<ReturnType<typeof store.getFacilityEmplo
         '総勤務時間',
         '日勤勤務時間',
         '夜勤勤務回数',
-        '夜勤勤務時間'
+        '夜勤勤務時間',
+        '有給休暇日数',
+        '特別休暇日数'
       ]
     : [
         '従業員番号',
@@ -1365,7 +1447,9 @@ const generateCSVData = (stats: Awaited<ReturnType<typeof store.getFacilityEmplo
         '休日出勤時間',
         '休日出勤+30円計算',
         '夜勤勤務回数',
-        '夜勤勤務時間'
+        '夜勤勤務時間',
+        '有給休暇日数',
+        '特別休暇日数'
       ]
   
   const rows = stats.employeeStats.map(employee => {
@@ -1405,14 +1489,7 @@ const generateCSVData = (stats: Awaited<ReturnType<typeof store.getFacilityEmplo
     }
     
     if (company?.is_special_company) {
-      // 특별한 회사일 때 간소화된 데이터
-      console.log('=== 특별한 회사 직원 데이터 디버깅 ===')
-      console.log('직원:', employee.employeeName)
-      console.log('dayShiftHours:', employee.dayShiftHours)
-      console.log('totalWorkHours:', employee.totalWorkHours)
-      console.log('nightShiftHours:', employee.nightShiftHours)
-      console.log('nightShiftCount:', employee.nightShiftCount)
-      
+      // 특별한 회사일 때 간소화된 데이터     
       return [
         employee.employeeCode,
         employee.employeeName,
@@ -1426,7 +1503,9 @@ const generateCSVData = (stats: Awaited<ReturnType<typeof store.getFacilityEmplo
         String(employee.totalWorkHours),      // 総勤務時間
         String(employee.dayShiftHours),       // 日勤勤務時間 (dayShiftHours 사용)
         String(employee.nightShiftCount),    // 夜勤勤務回数
-        String(employee.nightShiftHours)     // 夜勤勤務時間
+        String(employee.nightShiftHours),    // 夜勤勤務時間
+        String(employee.paidLeaveDays || 0), // 有給休暇日数
+        String(employee.specialLeaveDays || 0) // 特別休暇日数
       ]
     } else {
       // 일반 회사일 때 기존 데이터
@@ -1447,21 +1526,23 @@ const generateCSVData = (stats: Awaited<ReturnType<typeof store.getFacilityEmplo
         String(employee.holidayWorkHours),
         String(employee.holidayWorkHours * 30), // 休日出勤+30円計算
         String(employee.nightShiftCount),
-        String(employee.nightShiftHours)
+        String(employee.nightShiftHours),
+        String(employee.paidLeaveDays || 0), // 有給休暇日数
+        String(employee.specialLeaveDays || 0) // 特別休暇日数
       ]
     }
   })
   
   // 요약 정보를 맨 위에 추가
   const summaryRows = [
-    ['', '', '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
-    ['=== サマリー情報 ===', '', '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
-    ['会社名', company?.name || '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
-    ['施設名', facility?.name || '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
-    ['選択月', excelDownloadForm.value.selectedMonth, '', '', '', '', '', '', '', '', '', '', '', '', ''],
-    ['総従業員数', String(stats.totalEmployees), '名', '', '', '', '', '', '', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
-    ['=== 従業員別詳細情報 ===', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '']
+    ['', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
+    ['=== サマリー情報 ===', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
+    ['会社名', company?.name || '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
+    ['施設名', facility?.name || '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
+    ['選択月', excelDownloadForm.value.selectedMonth, '', '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
+    ['総従業員数', String(stats.totalEmployees), '名', '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
+    ['', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
+    ['=== 従業員別詳細情報 ===', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '']
   ]
   
   return [headers, ...summaryRows, ...rows]
@@ -1486,6 +1567,418 @@ const downloadCSVFile = (csvData: string[][], filename: string) => {
     document.body.removeChild(link)
   }
 }
+
+// 휴가 등록 관련 함수들
+const openVacationRequestModal = () => {
+  // 폼 초기화 - 모든 값을 빈 값으로 설정
+  vacationRequestForm.value = {
+    vacation_type: '',
+    vacation_subtype: '',
+    start_date: '',
+    end_date: '',
+    memo: ''
+  }
+  // 오전/오후 선택도 리셋
+  selectedHalfDayType.value = ''
+  showVacationRequestModal.value = true
+}
+
+const closeVacationRequestModal = () => {
+  showVacationRequestModal.value = false
+  vacationRequestForm.value = {
+    vacation_type: '',
+    vacation_subtype: '',
+    start_date: '',
+    end_date: '',
+    memo: ''
+  }
+}
+
+// 0.5일 선택 시 종료일 비활성화 여부
+const isEndDateDisabled = computed(() => {
+  return vacationRequestForm.value.vacation_type === '有給休暇' && 
+         vacationRequestForm.value.vacation_subtype === '0.5日'
+})
+
+// 0.5일 선택 시 오전/오후 선택 표시 여부
+const showHalfDayOptions = computed(() => {
+  return vacationRequestForm.value.vacation_type === '有給休暇' && 
+         vacationRequestForm.value.vacation_subtype === '0.5日'
+})
+
+// 오전 선택 가능 여부 (오전 근무가 있으면 선택 불가)
+const isMorningAvailable = computed(() => {
+  if (!showHalfDayOptions.value || !vacationRequestForm.value.start_date) return true
+  
+  const existingRecord = store.attendanceRecords.find(record => 
+    record.employee_id === selectedEmployee.value?.id && 
+    record.date === vacationRequestForm.value.start_date
+  )
+  
+  if (!existingRecord || !existingRecord.check_in || !existingRecord.check_out) {
+    return true // 근무 기록이 없으면 선택 가능
+  }
+  
+  // 예상 출퇴근시간이 있으면 그것을 기준으로, 없으면 실제 출퇴근시간을 기준으로
+  const checkInTime = existingRecord.scheduled_check_in || existingRecord.check_in
+  const checkOutTime = existingRecord.scheduled_check_out || existingRecord.check_out
+  
+  const checkInHour = parseInt(checkInTime.split(':')[0])
+  const checkOutHour = parseInt(checkOutTime.split(':')[0])
+  
+  // 오전 근무(09:00 이전 출근 또는 12:00 이전 퇴근)인 경우 오전 반차 불가
+  // 오전 반차는 09:00~12:00이므로, 이 시간대에 근무가 있으면 선택 불가
+  const hasMorningWork = (checkInHour < 12 && checkOutHour > 9)
+  
+  return !hasMorningWork
+})
+
+// 오후 선택 가능 여부 (오후 근무가 있으면 선택 불가)
+const isAfternoonAvailable = computed(() => {
+  if (!showHalfDayOptions.value || !vacationRequestForm.value.start_date) return true
+  
+  const existingRecord = store.attendanceRecords.find(record => 
+    record.employee_id === selectedEmployee.value?.id && 
+    record.date === vacationRequestForm.value.start_date
+  )
+  
+  if (!existingRecord || !existingRecord.check_in || !existingRecord.check_out) {
+    return true // 근무 기록이 없으면 선택 가능
+  }
+  
+  // 예상 출퇴근시간이 있으면 그것을 기준으로, 없으면 실제 출퇴근시간을 기준으로
+  const checkInTime = existingRecord.scheduled_check_in || existingRecord.check_in
+  const checkOutTime = existingRecord.scheduled_check_out || existingRecord.check_out
+  
+  const checkInHour = parseInt(checkInTime.split(':')[0])
+  const checkOutHour = parseInt(checkOutTime.split(':')[0])
+  
+  // 오후 근무(12:00 이후 출근 또는 18:00 이후 퇴근)인 경우 오후 반차 불가
+  // 오후 반차는 13:00~18:00이므로, 이 시간대에 근무가 있으면 선택 불가
+  const hasAfternoonWork = (checkInHour < 18 && checkOutHour > 13)
+  
+  return !hasAfternoonWork
+})
+
+// 선택된 오전/오후 값
+const selectedHalfDayType = ref('')
+
+// 휴가 서브타입 변경 시 처리
+const handleVacationSubtypeChange = () => {
+  if (isEndDateDisabled.value) {
+    // 0.5일인 경우 종료일을 시작일과 동일하게 설정
+    vacationRequestForm.value.end_date = vacationRequestForm.value.start_date
+    // 오전/오후 선택 리셋
+    selectedHalfDayType.value = ''
+  }
+}
+
+// 시작일 변경 시 처리
+const handleStartDateChange = () => {
+  // 시작일이 선택되었는데 종료일이 없으면 같은 날짜로 설정
+  if (vacationRequestForm.value.start_date && !vacationRequestForm.value.end_date) {
+    vacationRequestForm.value.end_date = vacationRequestForm.value.start_date
+  }
+  
+  if (isEndDateDisabled.value) {
+    // 0.5일인 경우 종료일을 시작일과 동일하게 설정
+    vacationRequestForm.value.end_date = vacationRequestForm.value.start_date
+    // 오전/오후 선택 리셋
+    selectedHalfDayType.value = ''
+  }
+}
+
+const submitVacationRequest = async () => {
+  if (!selectedEmployee.value) return
+  
+  // 중복 휴가 체크 (출근기록이나 휴가가 있는 경우)
+  if (hasExistingRecordOrVacation(vacationRequestForm.value.start_date, vacationRequestForm.value.end_date)) {
+    alert('選択された期間に既に勤務記録または有休が登録されています。')
+    return
+  }
+  
+  // 0.5일인 경우 오전/오후 선택 확인
+  if (vacationRequestForm.value.vacation_subtype === '0.5日' && !selectedHalfDayType.value) {
+    alert('時間帯を選択してください。')
+    return
+  }
+  
+  submittingVacationRequest.value = true
+  
+  try {
+    const { supabase } = await import('../lib/supabase')
+    
+    // 휴가 기간 계산
+    const startDate = new Date(vacationRequestForm.value.start_date)
+    const endDate = new Date(vacationRequestForm.value.end_date)
+    const timeDiff = endDate.getTime() - startDate.getTime()
+    const daysDiff = Math.ceil(timeDiff / (1000 * 3600 * 24)) + 1 // 시작일 포함
+    
+    // 휴가 유형에 따른 duration 계산
+    let duration = daysDiff
+    if (vacationRequestForm.value.vacation_type === '有給休暇' && vacationRequestForm.value.vacation_subtype === '0.5日') {
+      duration = 0.5
+    }
+    
+    // category와 sub_type 설정
+    let category = ''
+    let subType = null
+    
+    if (vacationRequestForm.value.vacation_type === '有給休暇') {
+      category = 'PAID_LEAVE'
+      if (vacationRequestForm.value.vacation_subtype === '0.5日') {
+        // 0.5일인 경우 선택된 오전/오후 정보를 포함
+        subType = `0.5日(${selectedHalfDayType.value})`
+      } else {
+        subType = vacationRequestForm.value.vacation_subtype
+      }
+    } else if (vacationRequestForm.value.vacation_type === '特別休暇') {
+      category = 'SPECIAL_LEAVE'
+      subType = vacationRequestForm.value.vacation_subtype
+    }
+    
+    const { error } = await supabase
+      .from('vacation_records')
+      .insert({
+        employee_id: selectedEmployee.value.id,
+        start_date: vacationRequestForm.value.start_date,
+        end_date: vacationRequestForm.value.end_date,
+        category: category,
+        sub_type: subType,
+        duration: duration,
+        note: vacationRequestForm.value.memo
+      })
+    
+    if (error) {
+      throw error
+    }
+
+    closeVacationRequestModal()
+    
+    // 휴가 기록 다시 로드
+    await loadVacationRecords()
+    
+    // 성공 메시지 표시
+    alert('有休登録が完了しました。')
+    
+  } catch (error) {
+    console.error('휴가 등록 중 오류 발생:', error)
+    alert('有休登録に失敗しました。')
+  } finally {
+    submittingVacationRequest.value = false
+  }
+}
+
+// 휴가 기록 로드 함수
+const loadVacationRecords = async () => {
+  if (!selectedEmployee.value) return
+  
+  loadingVacationRecords.value = true
+  
+  try {
+    const { supabase } = await import('../lib/supabase')
+    
+    const { data, error } = await supabase
+      .from('vacation_records')
+      .select('*')
+      .eq('employee_id', selectedEmployee.value.id)
+      .order('start_date', { ascending: false })
+    
+    if (error) {
+      throw error
+    }
+    
+    vacationRecords.value = data || []
+  } catch (error) {
+    console.error('휴가 기록 로드 중 오류 발생:', error)
+  } finally {
+    loadingVacationRecords.value = false
+  }
+}
+
+// 휴가 삭제 함수
+const deleteVacation = async (vacationId: string) => {
+  // 삭제할 휴가 정보 찾기
+  const vacationToDelete = vacationRecords.value.find(v => v.id === vacationId)
+  if (!vacationToDelete) return
+  
+  // 연결된 날짜들 계산
+  const startDate = new Date(vacationToDelete.start_date)
+  const endDate = new Date(vacationToDelete.end_date)
+  const connectedDates = []
+  
+  for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+    connectedDates.push(d.toISOString().split('T')[0])
+  }
+  
+  // 삭제 확인 메시지 생성
+  const vacationType = getVacationCategoryText(vacationToDelete.category)
+  const vacationSubtype = vacationToDelete.sub_type || ''
+  const dateRange = `${vacationToDelete.start_date} ~ ${vacationToDelete.end_date}`
+  const connectedDatesText = connectedDates.join(', ')
+  
+  const confirmMessage = `以下の有休記録を削除しますか？
+
+種類: ${vacationType} ${vacationSubtype}
+期間: ${dateRange}
+対象日: ${connectedDatesText}
+メモ: ${vacationToDelete.note || 'なし'}
+
+この操作は取り消せません。`
+
+  if (!confirm(confirmMessage)) return
+  
+  try {
+    const { supabase } = await import('../lib/supabase')
+    
+    const { error } = await supabase
+      .from('vacation_records')
+      .delete()
+      .eq('id', vacationId)
+    
+    if (error) {
+      throw error
+    }
+    
+    // 휴가 기록 다시 로드
+    await loadVacationRecords()
+    
+    // 성공 메시지 표시
+    alert('有休記録が削除されました。')
+    
+  } catch (error) {
+    console.error('휴가 삭제 중 오류 발생:', error)
+    alert('有休記録の削除に失敗しました。')
+  }
+}
+
+// 휴가 카테고리 텍스트
+const getVacationCategoryText = (category: string) => {
+  switch (category) {
+    case 'PAID_LEAVE':
+      return '有給休暇'
+    case 'SPECIAL_LEAVE':
+      return '特別休暇'
+    default:
+      return category
+  }
+}
+
+// 휴가 서브타입 텍스트 (0.5일 오전/오후 구분 포함)
+const getVacationSubtypeText = (subType: string | null) => {
+  if (!subType) return ''
+  
+  if (subType.startsWith('0.5日(')) {
+    const halfDayType = subType.match(/0\.5日\((.*?)\)/)?.[1] || ''
+    return `0.5日 (${halfDayType})`
+  }
+  
+  return subType
+}
+
+// 휴가 카테고리 색상
+const getVacationCategoryColor = (category: string) => {
+  switch (category) {
+    case 'PAID_LEAVE':
+      return '#27ae60' // 초록색
+    case 'SPECIAL_LEAVE':
+      return '#9b59b6' // 보라색
+    default:
+      return '#95a5a6'
+  }
+}
+
+// 휴가 등록 가능 여부 확인
+const canRegisterVacation = computed(() => {
+  if (!vacationRequestForm.value.start_date || !vacationRequestForm.value.end_date) return false
+  
+  // 모든 휴가 유형에 대해 출근기록과 휴가 중복 체크
+  return !hasExistingRecordOrVacation(
+    vacationRequestForm.value.start_date, 
+    vacationRequestForm.value.end_date
+  )
+})
+
+// 휴가 등록 폼의 날짜 변경 감지
+watch([() => vacationRequestForm.value.start_date, () => vacationRequestForm.value.end_date], () => {
+  // 날짜가 변경될 때마다 중복 체크 업데이트
+  // canRegisterVacation computed가 자동으로 재계산됨
+})
+
+// 타입 가드 함수들
+const isAttendanceRecord = (data: AttendanceRecord | VacationRecord): data is AttendanceRecord => {
+  return data && 'date' in data && 'check_in' in data && 'check_out' in data
+}
+
+const isVacationRecord = (data: AttendanceRecord | VacationRecord): data is VacationRecord => {
+  return data && 'start_date' in data && 'category' in data && 'duration' in data
+}
+
+// 휴가 기록 타입 정의
+type VacationRecord = typeof vacationRecords.value[0]
+
+// 해당 날짜의 근무 시간 정보 가져오기 (예상시간 포함)
+const getWorkTimeInfo = (date: string) => {
+  if (!selectedEmployee.value) return ''
+  
+  const record = store.attendanceRecords.find(record => 
+    record.employee_id === selectedEmployee.value?.id && 
+    record.date === date
+  )
+  
+  if (!record || !record.check_in || !record.check_out) {
+    return '勤務記録なし'
+  }
+  
+  const scheduledInfo = record.scheduled_check_in && record.scheduled_check_out 
+    ? `予定: ${record.scheduled_check_in}~${record.scheduled_check_out}`
+    : ''
+  
+  return scheduledInfo ? `${scheduledInfo}` : ''
+}
+
+// 날짜 범위 유효성 검사
+const isDateRangeValid = computed(() => {
+  if (!vacationRequestForm.value.start_date || !vacationRequestForm.value.end_date) return false
+  
+  const startDate = new Date(vacationRequestForm.value.start_date)
+  const endDate = new Date(vacationRequestForm.value.end_date)
+  
+  // 시작일이 종료일보다 늦으면 안됨
+  return startDate <= endDate
+})
+
+// 휴가 등록 버튼 비활성화 조건
+const isVacationSubmitDisabled = computed(() => {
+  // 기본 필수 항목 체크
+  if (!vacationRequestForm.value.vacation_type || 
+      !vacationRequestForm.value.vacation_subtype || 
+      !vacationRequestForm.value.start_date || 
+      !vacationRequestForm.value.end_date) {
+    return true
+  }
+  
+  // 날짜 범위 유효성 체크
+  if (!isDateRangeValid.value) {
+    return true
+  }
+  
+  // 0.5일 반차인 경우 시간대 선택 필수
+  if (vacationRequestForm.value.vacation_type === '有給休暇' && 
+      vacationRequestForm.value.vacation_subtype === '0.5日') {
+    if (!selectedHalfDayType.value) {
+      return true
+    }
+  }
+  
+  // 모든 휴가 유형에 대해 중복 체크
+  if (!canRegisterVacation.value) {
+    return true
+  }
+  
+  return false
+})
+
 </script>
 
 <template>
@@ -1666,6 +2159,20 @@ const downloadCSVFile = (csvData: string[][], filename: string) => {
             <div class="stat-label">総勤務時間</div>
           </div>
         </div>
+        <div class="stat-card">
+          <div class="stat-icon">🏖️</div>
+          <div class="stat-content">
+            <div class="stat-number">{{ workStats.paidLeaveDays }}日</div>
+            <div class="stat-label">有給休暇</div>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">🎉</div>
+          <div class="stat-content">
+            <div class="stat-number">{{ workStats.specialLeaveDays }}日</div>
+            <div class="stat-label">特別休暇</div>
+          </div>
+        </div>
       </div>
       
       <!-- 근무 유형별 통계 -->
@@ -1697,13 +2204,13 @@ const downloadCSVFile = (csvData: string[][], filename: string) => {
             </div>
           </div>
           <div class="stat-card">
-          <div class="stat-icon">🌅</div>
-          <div class="stat-content">
-            <div class="stat-number">{{ workStats.holidayWorkHours }}時間</div>
-            <div class="stat-label">休日出勤時間</div>
-            <div class="stat-subtitle">+30円計算：<span class="red-font">{{ workStats.holidayWorkHours * 30 }}円</span></div>
+            <div class="stat-icon">🌅</div>
+            <div class="stat-content">
+              <div class="stat-number">{{ workStats.holidayWorkHours }}時間</div>
+              <div class="stat-label">休日出勤時間</div>
+              <div class="stat-subtitle">+30円計算：<span class="red-font">{{ workStats.holidayWorkHours * 30 }}円</span></div>
+            </div>
           </div>
-        </div>
           <div class="stat-card shift-card">
             <div class="stat-icon">🌙</div>
             <div class="stat-content">
@@ -1743,16 +2250,24 @@ const downloadCSVFile = (csvData: string[][], filename: string) => {
     <div v-if="selectedEmployee" class="work-records">
       <div class="work-records-header">
         <h2>詳細勤務記録</h2>
-        <button 
-          @click="openRegistrationRequestModal"
-          class="registration-request-btn"
-          :title="isRequestButtonDisabled(null, new Date().toISOString().split('T')[0]) || hasExistingRecord(new Date().toISOString().split('T')[0]) ? '이미 등록된 날짜입니다' : '勤務記録登録リクエストを送信'"
-        >
-          ➕ 勤務登録要請
-        </button>
+        <div class="header-buttons">
+          <button 
+            @click="openVacationRequestModal"
+            class="vacation-request-btn"
+          >
+            🏖️ 有休登録
+          </button>
+          <button 
+            @click="openRegistrationRequestModal"
+            class="registration-request-btn"
+            :title="isRequestButtonDisabled(null, new Date().toISOString().split('T')[0]) || hasExistingRecord(new Date().toISOString().split('T')[0]) ? '이미 등록된 날짜입니다' : '勤務記録登録リクエストを送信'"
+          >
+            ➕ 勤務登録要請
+          </button>
+        </div>
       </div>
-      <div v-if="selectedPeriodRecords.length === 0" class="no-records">
-        選択された期間の勤務記録がありません。
+      <div v-if="selectedPeriodIntegratedRecords.length === 0" class="no-records">
+        選択された期間の記録がありません。
       </div>
       <div v-else class="records-table">
         <table>
@@ -1773,48 +2288,67 @@ const downloadCSVFile = (csvData: string[][], filename: string) => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="record in selectedPeriodRecords" :key="record.id"
-                :class="{ timeDifference: isCheckInTimeDifferent(record) || isCheckOutTimeDifferent(record) }">
+            <tr v-for="record in selectedPeriodIntegratedRecords" :key="`${record.type}-${record.data.id}`"
+                :class="{ timeDifference: record.type === 'attendance' && isAttendanceRecord(record.data) && (isCheckInTimeDifferent(record.data) || isCheckOutTimeDifferent(record.data)) }">
               <td>{{ formatDate(record.date) }}</td>
-              <td>{{ formatTime(record.scheduled_check_in) }}</td>
-              <td>{{ formatTime(record.scheduled_check_out) }}</td>
-              <td>{{ formatTime(record.break_time) }}</td>
-              <td>
-                <span :class="{ 'time-display': !getCheckInDifferenceText(record), 'time-difference': getCheckInDifferenceText(record) }">
-                  {{ formatTime(record.check_in) }}
+              <td v-if="isAttendanceRecord(record.data)">{{ formatTime(record.data.scheduled_check_in) }}</td>
+              <td v-else-if="isVacationRecord(record.data)" :colspan="workStats.isSpecialCompany ? 8 : 10" class="vacation-merged-cell">
+                <div class="vacation-info">
+                  <span class="vacation-badge" :style="{ backgroundColor: getVacationCategoryColor(record.data.category) }">
+                    {{ getVacationCategoryText(record.data.category) }}
+                  </span>
+                  <span v-if="record.data.sub_type" class="vacation-subtype">
+                    {{ getVacationSubtypeText(record.data.sub_type) }}
+                  </span>
+                </div>
+              </td>
+              <td v-if="isAttendanceRecord(record.data)">{{ formatTime(record.data.scheduled_check_out) }}</td>
+              <td v-if="isAttendanceRecord(record.data)">{{ formatTime(record.data.break_time) }}</td>
+              <td v-if="isAttendanceRecord(record.data)">
+                <span :class="{ 'time-display': !getCheckInDifferenceText(record.data), 'time-difference': getCheckInDifferenceText(record.data) }">
+                  {{ formatTime(record.data.check_in) }}
                 </span>
               </td>
-              <td>
-                <span :class="{ 'time-display': !getCheckOutDifferenceText(record), 'time-difference': getCheckOutDifferenceText(record) }">
-                  {{ formatTime(record.check_out) }}
+              <td v-if="isAttendanceRecord(record.data)">
+                <span :class="{ 'time-display': !getCheckOutDifferenceText(record.data), 'time-difference': getCheckOutDifferenceText(record.data) }">
+                  {{ formatTime(record.data.check_out) }}
                 </span>
               </td>
-              <td v-if="!workStats.isSpecialCompany">
-                {{ (() => { const hours = calculateShiftHours(record.check_in, record.check_out, record.break_time, isHoliday(record.date), record.scheduled_check_in, record.scheduled_check_out); return hours.early > 0 ? `${hours.early.toFixed(1)}時間` : '-'; })() }}
+              <td v-if="isAttendanceRecord(record.data) && !workStats.isSpecialCompany">
+                {{ (() => { const hours = calculateShiftHours(record.data.check_in, record.data.check_out, record.data.break_time, isHoliday(record.data.date), record.data.scheduled_check_in, record.data.scheduled_check_out); return hours.early > 0 ? `${hours.early.toFixed(1)}時間` : '-'; })() }}
               </td>
-              <td v-if="!workStats.isSpecialCompany">
-                {{ (() => { const hours = calculateShiftHours(record.check_in, record.check_out, record.break_time, isHoliday(record.date), record.scheduled_check_in, record.scheduled_check_out); return hours.late > 0 ? `${hours.late.toFixed(1)}時間` : '-'; })() }}
+              <td v-if="isAttendanceRecord(record.data) && !workStats.isSpecialCompany">
+                {{ (() => { const hours = calculateShiftHours(record.data.check_in, record.data.check_out, record.data.break_time, isHoliday(record.data.date), record.data.scheduled_check_in, record.data.scheduled_check_out); return hours.late > 0 ? `${hours.late.toFixed(1)}時間` : '-'; })() }}
               </td>
-              <td>
-                {{ (() => { const hours = calculateShiftHours(record.check_in, record.check_out, record.break_time, isHoliday(record.date), record.scheduled_check_in, record.scheduled_check_out); return hours.day > 0 ? `${hours.day.toFixed(1)}時間` : '-'; })() }}
+              <td v-if="isAttendanceRecord(record.data)">
+                {{ (() => { const hours = calculateShiftHours(record.data.check_in, record.data.check_out, record.data.break_time, isHoliday(record.data.date), record.data.scheduled_check_in, record.data.scheduled_check_out); return hours.day > 0 ? `${hours.day.toFixed(1)}時間` : '-'; })() }}
               </td>
-              <td>
-                {{ record.check_in && record.check_out ? `${calculateNetWorkHours(record.check_in, record.check_out, record.break_time, isHoliday(record.date), record.scheduled_check_in, record.scheduled_check_out).toFixed(1)}時間` : '-' }}
+              <td v-if="isAttendanceRecord(record.data)">
+                {{ record.data.check_in && record.data.check_out ? `${calculateNetWorkHours(record.data.check_in, record.data.check_out, record.data.break_time, isHoliday(record.data.date), record.data.scheduled_check_in, record.data.scheduled_check_out).toFixed(1)}時間` : '-' }}
               </td>
-              <td>
-                <span class="status-badge" :style="{ backgroundColor: getWorkStatusColor(record) }">
-                  {{ getWorkStatusText(record) }}
+              <td v-if="isAttendanceRecord(record.data)">
+                <span class="status-badge" :style="{ backgroundColor: getWorkStatusColor(record.data) }">
+                  {{ getWorkStatusText(record.data) }}
                 </span>
               </td>
-              <td>
+              <td v-if="isAttendanceRecord(record.data)">
                 <button 
-                  @click="openChangeRequestModal(record)"
+                  @click="openChangeRequestModal(record.data)"
                   class="change-request-btn"
-                  :class="{ 'disabled': isRequestButtonDisabled(record, record.date) }"
-                  :disabled="isRequestButtonDisabled(record, record.date)"
-                  :title="isRequestButtonDisabled(record, record.date) ? '요청 처리중' : '修正リクエストを送信'"
+                  :class="{ 'disabled': isRequestButtonDisabled(record.data, record.data.date) }"
+                  :disabled="isRequestButtonDisabled(record.data, record.data.date)"
+                  :title="isRequestButtonDisabled(record.data, record.data.date) ? '要請中' : '修正リクエストを送信'"
                 >
-                  {{ getRequestButtonText(record, record.date) }}
+                  {{ getRequestButtonText(record.data, record.data.date) }}
+                </button>
+              </td>
+              <td v-else-if="isVacationRecord(record.data)">
+                <button 
+                  @click="deleteVacation(record.data.id)"
+                  class="delete-vacation-btn"
+                  title="有休記録を削除"
+                >
+                  🗑️ 削除
                 </button>
               </td>
             </tr>
@@ -1845,11 +2379,11 @@ const downloadCSVFile = (csvData: string[][], filename: string) => {
           <tbody>
             <tr v-for="request in changeRequests" :key="request.id">
               <td>{{ formatDate(request.requested_date) }}</td>
-                              <td>
-                  <span class="request-type-badge" :style="{ backgroundColor: getRequestTypeColor(request.request_type) }">
-                    {{ getRequestTypeText(request.request_type) }}
-                  </span>
-                </td>
+              <td>
+                <span class="request-type-badge" :style="{ backgroundColor: getRequestTypeColor(request.request_type) }">
+                  {{ getRequestTypeText(request.request_type) }}
+                </span>
+              </td>
               <td>{{ formatTime(request.requested_check_in) }}</td>
               <td>{{ formatTime(request.requested_check_out) }}</td>
               <td>{{ formatTime(request.requested_scheduled_check_in) }}</td>
@@ -1871,6 +2405,8 @@ const downloadCSVFile = (csvData: string[][], filename: string) => {
         </table>
       </div>
     </div>
+
+
 
     <!-- 수정요청 모달 -->
     <div v-if="showChangeRequestModal" class="modal-overlay" @click="closeChangeRequestModal">
@@ -2222,6 +2758,173 @@ const downloadCSVFile = (csvData: string[][], filename: string) => {
               </button>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 휴가 등록 모달 -->
+    <div v-if="showVacationRequestModal" class="modal-overlay" @click="closeVacationRequestModal">
+      <div class="modal-content" @click.stop>
+        <div class="modal-header">
+          <h3>有休登録</h3>
+          <button @click="closeVacationRequestModal" class="close-btn">×</button>
+        </div>
+        
+        <div class="modal-body">
+          <div class="record-info">
+            <p><strong>従業員:</strong> {{ selectedEmployee?.last_name }}{{ selectedEmployee?.first_name }}</p>
+          </div>
+          
+          <form @submit.prevent="submitVacationRequest" class="change-request-form">
+            <!-- 휴가 유형 선택 -->
+            <div class="form-group">
+              <label>有給休暇 <span class="required">*</span></label>
+              <select 
+                v-model="vacationRequestForm.vacation_type"
+                class="form-input"
+                required
+              >
+                <option value="">選択してください</option>
+                <option value="有給休暇">有給休暇</option>
+                <option value="特別休暇">特別休暇</option>
+              </select>
+            </div>
+            
+            <div class="form-group" v-if="vacationRequestForm.vacation_type === '有給休暇'">
+              <label>日数 <span class="required">*</span></label>
+              <select 
+                v-model="vacationRequestForm.vacation_subtype"
+                class="form-input"
+                required
+                @change="handleVacationSubtypeChange"
+              >
+                <option value="">選択してください</option>
+                <option value="1日">1日</option>
+                <option value="0.5日">0.5日</option>
+              </select>
+            </div>
+
+            <div class="form-group" v-if="vacationRequestForm.vacation_type === '特別休暇'">
+              <label>特別休暇の種類 <span class="required">*</span></label>
+              <select 
+                v-model="vacationRequestForm.vacation_subtype"
+                class="form-input"
+                required
+                @change="handleVacationSubtypeChange"
+              >
+                <option value="">選択してください</option>
+                <option value="夏期休暇">夏期休暇</option>
+                <option value="冬期休暇">冬期休暇</option>
+                <option value="慶弔休暇">慶弔休暇</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label>開始日 <span class="required">*</span></label>
+              <input 
+                type="date" 
+                v-model="vacationRequestForm.start_date"
+                class="form-input"
+                required
+                @change="handleStartDateChange"
+              >
+            </div>
+            
+            <div class="form-group">
+              <label>終了日 <span class="required">*</span></label>
+              <input 
+                type="date" 
+                v-model="vacationRequestForm.end_date"
+                class="form-input"
+                :class="{ 'error': !isDateRangeValid && vacationRequestForm.end_date }"
+                :disabled="isEndDateDisabled"
+                required
+              >
+              <small v-if="isEndDateDisabled" class="form-help">
+                0.5日の場合は開始日と同じ日付が自動設定されます
+              </small>
+              <div v-if="!isDateRangeValid && vacationRequestForm.start_date && vacationRequestForm.end_date" class="error-message">
+                終了日は開始日以降の日付を選択してください。
+              </div>
+              <div v-if="!canRegisterVacation && vacationRequestForm.start_date && vacationRequestForm.end_date && isDateRangeValid" class="error-message">
+                選択された期間に既に有休か勤務が登録されています。
+              </div>
+            </div>
+
+            <!-- 0.5일 선택 시 오전/오후 선택 -->
+            <div class="form-group" v-if="showHalfDayOptions">
+              <label>時間帯 <span class="required">*</span></label>
+              
+              <!-- 근무 시간 정보 표시 -->
+              <div v-if="!isMorningAvailable || !isAfternoonAvailable" class="work-time-info">
+                <div class="info-title">該当日の勤務時間:</div>
+                <div class="info-content">
+                  {{ getWorkTimeInfo(vacationRequestForm.start_date) }}
+                </div>
+                <div class="info-note">
+                  {{ !isMorningAvailable ? '午前は選択できません（午前勤務のため）' : '' }}
+                </div>
+                <div class="info-note">
+                  {{ !isAfternoonAvailable ? '午後は選択できません（午後勤務のため）' : '' }}
+                </div>
+
+              </div>
+              
+              <div class="half-day-options">
+                <label class="radio-option" :class="{ 'disabled': !isMorningAvailable }">
+                  <input 
+                    type="radio" 
+                    name="half-day-type" 
+                    value="午前" 
+                    v-model="selectedHalfDayType"
+                    :disabled="!isMorningAvailable"
+                    class="radio-input"
+                  >
+                  <span class="radio-label" :class="{ 'disabled': !isMorningAvailable }">午前 (09:00~12:00)</span>
+                  <span v-if="!isMorningAvailable" class="disabled-badge">選択不可</span>
+                </label>
+                <label class="radio-option" :class="{ 'disabled': !isAfternoonAvailable }">
+                  <input 
+                    type="radio" 
+                    name="half-day-type" 
+                    value="午後" 
+                    v-model="selectedHalfDayType"
+                    :disabled="!isAfternoonAvailable"
+                    class="radio-input"
+                  >
+                  <span class="radio-label" :class="{ 'disabled': !isAfternoonAvailable }">午後 (13:00~18:00)</span>
+                  <span v-if="!isAfternoonAvailable" class="disabled-badge">選択不可</span>
+                </label>
+              </div>
+            </div>
+            
+            <div class="form-group">
+              <label>メモ</label>
+              <textarea 
+                v-model="vacationRequestForm.memo"
+                class="form-textarea"
+                placeholder="メモを入力してください"
+                rows="4"
+              ></textarea>
+            </div>
+            
+            <div class="form-actions">
+              <button 
+                type="button" 
+                @click="closeVacationRequestModal"
+                class="btn-secondary"
+              >
+                キャンセル
+              </button>
+              <button 
+                type="submit" 
+                :disabled="submittingVacationRequest || isVacationSubmitDisabled"
+                class="btn-primary"
+              >
+                {{ submittingVacationRequest ? '送信中...' : '有休登録リクエスト送信' }}
+              </button>
+            </div>
+          </form>
         </div>
       </div>
     </div>
@@ -2616,6 +3319,7 @@ const downloadCSVFile = (csvData: string[][], filename: string) => {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
   gap: 2rem;
+  padding-bottom: 2rem;
 }
 
 .stat-card {
@@ -3075,6 +3779,12 @@ const downloadCSVFile = (csvData: string[][], filename: string) => {
   margin: 0;
 }
 
+.header-buttons {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+}
+
 .registration-request-btn {
   background: #27ae60;
   color: white;
@@ -3092,6 +3802,27 @@ const downloadCSVFile = (csvData: string[][], filename: string) => {
 
 .registration-request-btn:hover {
   background: #229954;
+}
+
+.vacation-request-btn {
+  background: #3498db;
+  color: white;
+  border: none;
+  padding: 0.75rem 1.5rem;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 1rem;
+  font-weight: 600;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.vacation-request-btn:hover {
+  background: #2980b9;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 15px rgba(52, 152, 219, 0.3);
 }
 
 .registration-request-btn.disabled,
@@ -3330,6 +4061,13 @@ const downloadCSVFile = (csvData: string[][], filename: string) => {
 .form-textarea {
   min-height: 100px;
   resize: vertical;
+}
+
+.form-help {
+  font-size: 0.9rem;
+  color: #7f8c8d;
+  margin-top: 0.5rem;
+  font-style: italic;
 }
 
 .form-actions {
@@ -3684,4 +4422,269 @@ const downloadCSVFile = (csvData: string[][], filename: string) => {
 .admin-toggle-btn.expanded:hover {
   transform: translateY(-1px);
 }
-</style> 
+
+.vacation-cell {
+  color: #7f8c8d;
+  font-style: italic;
+  text-align: center;
+}
+
+.vacation-info {
+  text-align: center;
+  gap: 0.5rem;
+  padding: 1rem;
+}
+
+.vacation-badge {
+  padding: 0.5rem 1rem;
+  margin-right: 0.5rem;
+  border-radius: 20px;
+  color: white;
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-align: center;
+  white-space: nowrap;
+  margin-bottom: 0.5rem;
+}
+
+.vacation-subtype {
+  font-size: 0.8rem;
+  color: #7f8c8d;
+  text-align: center;
+  font-style: italic;
+}
+
+.vacation-duration {
+  font-size: 0.9rem;
+  color: #2c3e50;
+  font-weight: 600;
+}
+
+.vacation-note {
+  font-size: 0.8rem;
+  color: #7f8c8d;
+  font-style: italic;
+  max-width: 200px;
+  text-align: center;
+  word-wrap: break-word;
+}
+
+.vacation-card:hover {
+  border-color: #8e44ad;
+  transform: translateY(-4px);
+  box-shadow: 0 8px 25px rgba(155, 89, 182, 0.15);
+}
+
+.vacation-card .stat-icon {
+  color: #9b59b6;
+}
+
+/* 휴가 삭제 버튼 스타일 */
+.delete-vacation-btn {
+  background: #e74c3c;
+  color: white;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.delete-vacation-btn:hover {
+  background: #c0392b;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 15px rgba(231, 76, 60, 0.3);
+}
+
+/* 0.5일 오전/오후 선택 스타일 */
+.half-day-options {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-top: 0.5rem;
+}
+
+.radio-option {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  border: 2px solid #e0e0e0;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  background: white;
+}
+
+.radio-option:hover {
+  border-color: #3498db;
+  background: #f8f9fa;
+}
+
+.radio-option input[type="radio"]:checked + .radio-label {
+  color: #3498db;
+  font-weight: 600;
+}
+
+.radio-option:has(input[type="radio"]:checked) {
+  border-color: #3498db;
+  background: #f0f8ff;
+}
+
+.radio-input {
+  margin: 0;
+  cursor: pointer;
+}
+
+.radio-label {
+  font-size: 1rem;
+  color: #2c3e50;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.vacation-badge {
+  padding: 0.5rem 1rem;
+  border-radius: 20px;
+  color: white;
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-align: center;
+  white-space: nowrap;
+  margin-bottom: 0.5rem;
+}
+
+.vacation-subtype {
+  font-size: 0.8rem;
+  color: #7f8c8d;
+  text-align: center;
+  font-style: italic;
+  background: rgba(255, 255, 255, 0.8);
+  padding: 0.3rem 0.8rem;
+  border-radius: 12px;
+  border: 1px solid #e0e0e0;
+}
+
+/* 자동 설정 안내 메시지 스타일 */
+.auto-set-notice {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  background: #e8f5e8;
+  border: 1px solid #27ae60;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+}
+
+.notice-icon {
+  font-size: 1.2rem;
+}
+
+.notice-text {
+  color: #27ae60;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+/* 자동 선택된 옵션 스타일 */
+.radio-option.auto-selected {
+  border-color: #27ae60;
+  background: #f0f8f0;
+}
+
+.auto-badge {
+  background: #27ae60;
+  color: white;
+  padding: 0.2rem 0.5rem;
+  border-radius: 12px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  margin-left: auto;
+}
+
+/* 근무 시간 정보 스타일 */
+.work-time-info {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: #f8f9fa;
+  border-radius: 8px;
+  border: 1px solid #e0e0e0;
+}
+
+.info-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #2c3e50;
+  margin-bottom: 0.5rem;
+}
+
+.info-content {
+  font-size: 0.9rem;
+  color: #7f8c8d;
+  font-family: monospace;
+}
+
+/* 비활성화된 옵션 스타일 */
+.radio-option.disabled {
+  border-color: #bdc3c7;
+  background: #f8f9fa;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.radio-option.disabled:hover {
+  border-color: #bdc3c7;
+  background: #f8f9fa;
+  transform: none;
+}
+
+.radio-label.disabled {
+  color: #95a5a6;
+  cursor: not-allowed;
+}
+
+.disabled-badge {
+  background: #95a5a6;
+  color: white;
+  padding: 0.2rem 0.5rem;
+  border-radius: 12px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  margin-left: auto;
+}
+
+/* 근무 시간 정보 스타일 */
+.work-time-info {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: #f8f9fa;
+  border-radius: 8px;
+  border: 1px solid #e0e0e0;
+}
+
+.info-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #2c3e50;
+  margin-bottom: 0.5rem;
+}
+
+.info-content {
+  font-size: 0.9rem;
+  color: #7f8c8d;
+  font-family: monospace;
+  margin-bottom: 0.5rem;
+}
+
+.info-note {
+  font-size: 0.8rem;
+  color: #e74c3c;
+  font-style: italic;
+  font-weight: 500;
+}
+</style>

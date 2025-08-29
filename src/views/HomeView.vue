@@ -170,19 +170,23 @@ const employeeRecords = computed(() => {
     // 먼저 오늘 기록 확인
     record = store.getEmployeeRecord(employee.id, store.currentDate)
     
-    // 오늘 기록이 없으면 전날 기록 확인 (야간 근무자만, 아직 퇴근하지 않은 경우)
+    // 오늘 기록이 없으면 이전 기록 확인 (야간 근무자만, 아직 퇴근하지 않은 경우)
     if (!record) {
-      const yesterday = new Date()
-      yesterday.setDate(yesterday.getDate() - 1)
-      const year = yesterday.getFullYear()
-      const month = String(yesterday.getMonth() + 1).padStart(2, '0')
-      const day = String(yesterday.getDate()).padStart(2, '0')
-      const yesterdayDate = `${year}-${month}-${day}`
-      const yesterdayRecord = store.getEmployeeRecord(employee.id, yesterdayDate)
-      
-      // 야간 근무자이고 아직 퇴근하지 않은 경우만
-      if (yesterdayRecord && yesterdayRecord.is_night_shift && yesterdayRecord.check_in && !yesterdayRecord.check_out) {
-        record = yesterdayRecord
+      const today = new Date()
+      for (let daysBack = 1; daysBack <= 7; daysBack++) {
+        const beforeDate = new Date()
+        beforeDate.setDate(today.getDate() - daysBack)
+        const year = beforeDate.getFullYear()
+        const month = String(beforeDate.getMonth() + 1).padStart(2, '0')
+        const day = String(beforeDate.getDate()).padStart(2, '0')
+        const beforeDateString = `${year}-${month}-${day}`
+        const beforeRecord = store.getEmployeeRecord(employee.id, beforeDateString)
+        
+        // 야간 근무자이고 아직 퇴근하지 않은 경우만
+        if (beforeRecord && beforeRecord.is_night_shift && beforeRecord.check_in && !beforeRecord.check_out) {
+          record = beforeRecord
+          break
+        }
       }
     }
     
@@ -192,7 +196,7 @@ const employeeRecords = computed(() => {
       tomorrow.setDate(tomorrow.getDate() + 1)
       const year = tomorrow.getFullYear()
       const month = String(tomorrow.getMonth() + 1).padStart(2, '0')
-      const day = String(tomorrow.getDate()).padStart(2, '0')
+      const day = tomorrow.getDate().toString().padStart(2, '0')
       const tomorrowDate = `${year}-${month}-${day}`
       const tomorrowRecord = store.getEmployeeRecord(employee.id, tomorrowDate)
       
@@ -214,43 +218,58 @@ const employeeRecords = computed(() => {
   return records
 })
 
-// 전날 출근하고 퇴근하지 않은 직원 확인
-const hasUnfinishedYesterdayWork = computed(() => {
+// 이전 출근하고 퇴근하지 않은 직원 확인
+const hasUnfinishedBeforeWork = computed(() => {
   if (!selectedEmployeeForModal.value) return false
   
   const employeeId = selectedEmployeeForModal.value.id
-  const yesterday = new Date()
-  yesterday.setDate(yesterday.getDate() - 1)
-  const year = yesterday.getFullYear()
-  const month = String(yesterday.getMonth() + 1).padStart(2, '0')
-  const day = String(yesterday.getDate()).padStart(2, '0')
-  const yesterdayDate = `${year}-${month}-${day}`
+  const today = new Date()
   
-  const yesterdayRecord = store.getEmployeeRecord(employeeId, yesterdayDate)
+  // 오늘을 기준으로 이전 날짜들을 확인 (최대 7일 전까지)
+  for (let daysBack = 1; daysBack <= 7; daysBack++) {
+    const beforeDate = new Date()
+    beforeDate.setDate(today.getDate() - daysBack)
+    const year = beforeDate.getFullYear()
+    const month = String(beforeDate.getMonth() + 1).padStart(2, '0')
+    const day = String(beforeDate.getDate()).padStart(2, '0')
+    const beforeDateString = `${year}-${month}-${day}`
+    
+    const beforeRecord = store.getEmployeeRecord(employeeId, beforeDateString)
+    
+    // 이전 날짜에 출근했지만 퇴근하지 않은 경우 (야간근무 제외)
+    if (beforeRecord && beforeRecord.check_in && !beforeRecord.check_out && !beforeRecord.is_night_shift) {
+      return true
+    }
+  }
   
-  // 전날 출근했지만 퇴근하지 않은 경우 (야간근무 제외)
-  return yesterdayRecord && yesterdayRecord.check_in && !yesterdayRecord.check_out && !yesterdayRecord.is_night_shift
+  return false
 })
 
-// 전날 미퇴근 정보 가져오기
-const getYesterdayWorkInfo = computed(() => {
-  if (!selectedEmployeeForModal.value || !hasUnfinishedYesterdayWork.value) return null
+// 이전 미퇴근 정보 가져오기
+const getBeforeWorkInfo = computed(() => {
+  if (!selectedEmployeeForModal.value || !hasUnfinishedBeforeWork.value) return null
   
   const employeeId = selectedEmployeeForModal.value.id
-  const yesterday = new Date()
-  yesterday.setDate(yesterday.getDate() - 1)
-  const year = yesterday.getFullYear()
-  const month = String(yesterday.getMonth() + 1).padStart(2, '0')
-  const day = String(yesterday.getDate()).padStart(2, '0')
-  const yesterdayDate = `${year}-${month}-${day}`
+  const today = new Date()
   
-  const yesterdayRecord = store.getEmployeeRecord(employeeId, yesterdayDate)
-  
-  if (yesterdayRecord) {
-    return {
-      date: yesterdayDate,
-      checkIn: yesterdayRecord.check_in,
-      isNightShift: yesterdayRecord.is_night_shift
+  // 오늘을 기준으로 이전 날짜들을 확인 (최대 7일 전까지)
+  for (let daysBack = 1; daysBack <= 7; daysBack++) {
+    const beforeDate = new Date()
+    beforeDate.setDate(today.getDate() - daysBack)
+    const year = beforeDate.getFullYear()
+    const month = String(beforeDate.getMonth() + 1).padStart(2, '0')
+    const day = String(beforeDate.getDate()).padStart(2, '0')
+    const beforeDateString = `${year}-${month}-${day}`
+    
+    const beforeRecord = store.getEmployeeRecord(employeeId, beforeDateString)
+    
+    if (beforeRecord && beforeRecord.check_in && !beforeRecord.check_out && !beforeRecord.is_night_shift) {
+      return {
+        date: beforeDateString,
+        checkIn: beforeRecord.check_in,
+        isNightShift: beforeRecord.is_night_shift,
+        daysAgo: daysBack
+      }
     }
   }
   
@@ -460,17 +479,21 @@ const getEmployeeExpectedTime = (employeeId: string, type: 'checkIn' | 'checkOut
     // 먼저 오늘 기록 확인
     record = store.getEmployeeRecord(employeeId, store.currentDate)
     
-    // 오늘 기록이 없으면 전날 야간 근무 기록 확인 (야간 근무자만)
+    // 오늘 기록이 없으면 이전 야간 근무 기록 확인 (야간 근무자만)
     if (!record) {
-      const yesterday = new Date()
-      yesterday.setDate(yesterday.getDate() - 1)
-      const year = yesterday.getFullYear()
-      const month = String(yesterday.getMonth() + 1).padStart(2, '0')
-      const day = String(yesterday.getDate()).padStart(2, '0')
-      const yesterdayDate = `${year}-${month}-${day}`
-      const yesterdayRecord = store.getEmployeeRecord(employeeId, yesterdayDate)
-      if (yesterdayRecord && yesterdayRecord.is_night_shift) {
-        record = yesterdayRecord
+      const today = new Date()
+      for (let daysBack = 1; daysBack <= 7; daysBack++) {
+        const beforeDate = new Date()
+        beforeDate.setDate(today.getDate() - daysBack)
+        const year = beforeDate.getFullYear()
+        const month = String(beforeDate.getMonth() + 1).padStart(2, '0')
+        const day = String(beforeDate.getDate()).padStart(2, '0')
+        const beforeDateString = `${year}-${month}-${day}`
+        const beforeRecord = store.getEmployeeRecord(employeeId, beforeDateString)
+        if (beforeRecord && beforeRecord.is_night_shift) {
+          record = beforeRecord
+          break
+        }
       }
     }
     
@@ -480,7 +503,7 @@ const getEmployeeExpectedTime = (employeeId: string, type: 'checkIn' | 'checkOut
       tomorrow.setDate(tomorrow.getDate() + 1)
       const year = tomorrow.getFullYear()
       const month = String(tomorrow.getMonth() + 1).padStart(2, '0')
-      const day = String(tomorrow.getDate()).padStart(2, '0')
+      const day = tomorrow.getDate().toString().padStart(2, '0')
       const tomorrowDate = `${year}-${month}-${day}`
       const tomorrowRecord = store.getEmployeeRecord(employeeId, tomorrowDate)
       if (tomorrowRecord && tomorrowRecord.is_night_shift) {
@@ -509,17 +532,21 @@ const setEmployeeExpectedTime = (employeeId: string, type: 'checkIn' | 'checkOut
     // 먼저 오늘 기록 확인
     record = store.getEmployeeRecord(employeeId, store.currentDate)
     
-    // 오늘 기록이 없으면 전날 야간 근무 기록 확인 (야간 근무자만)
+    // 오늘 기록이 없으면 이전 야간 근무 기록 확인 (야간 근무자만)
     if (!record) {
-      const yesterday = new Date()
-      yesterday.setDate(yesterday.getDate() - 1)
-      const year = yesterday.getFullYear()
-      const month = String(yesterday.getMonth() + 1).padStart(2, '0')
-      const day = String(yesterday.getDate()).padStart(2, '0')
-      const yesterdayDate = `${year}-${month}-${day}`
-      const yesterdayRecord = store.getEmployeeRecord(employeeId, yesterdayDate)
-      if (yesterdayRecord && yesterdayRecord.is_night_shift) {
-        record = yesterdayRecord
+      const today = new Date()
+      for (let daysBack = 1; daysBack <= 7; daysBack++) {
+        const beforeDate = new Date()
+        beforeDate.setDate(today.getDate() - daysBack)
+        const year = beforeDate.getFullYear()
+        const month = String(beforeDate.getMonth() + 1).padStart(2, '0')
+        const day = String(beforeDate.getDate()).padStart(2, '0')
+        const beforeDateString = `${year}-${month}-${day}`
+        const beforeRecord = store.getEmployeeRecord(employeeId, beforeDateString)
+        if (beforeRecord && beforeRecord.is_night_shift) {
+          record = beforeRecord
+          break
+        }
       }
     }
     
@@ -529,7 +556,7 @@ const setEmployeeExpectedTime = (employeeId: string, type: 'checkIn' | 'checkOut
       tomorrow.setDate(tomorrow.getDate() + 1)
       const year = tomorrow.getFullYear()
       const month = String(tomorrow.getMonth() + 1).padStart(2, '0')
-      const day = String(tomorrow.getDate()).padStart(2, '0')
+      const day = tomorrow.getDate().toString().padStart(2, '0')
       const tomorrowDate = `${year}-${month}-${day}`
       const tomorrowRecord = store.getEmployeeRecord(employeeId, tomorrowDate)
       if (tomorrowRecord && tomorrowRecord.is_night_shift) {
@@ -789,15 +816,16 @@ const closeEmployeeModal = () => {
               <span class="employee-name">{{ selectedEmployeeForModal.last_name }}{{ selectedEmployeeForModal.first_name }}</span>
             </div>
             
-            <!-- 전날 미퇴근 알림 -->
-            <div v-if="hasUnfinishedYesterdayWork" class="yesterday-work-alert">
+            <!-- 이전 미퇴근 알림 -->
+            <div v-if="hasUnfinishedBeforeWork" class="before-work-alert">
               <div class="alert-icon">⚠️</div>
               <div class="alert-content">
-                <div class="alert-title">前日の未退勤</div>
+                <div class="alert-title">前回の未退勤</div>
                 <div class="alert-details">
-                  <span class="alert-date">{{ getYesterdayWorkInfo?.date }}</span>
-                  <span class="alert-time">出勤: {{ getYesterdayWorkInfo?.checkIn }}</span>
-                  <span v-if="getYesterdayWorkInfo?.isNightShift" class="alert-shift">夜勤</span>
+                  <span class="alert-date">{{ getBeforeWorkInfo?.date }}</span>
+                  <span class="alert-time">出勤: {{ getBeforeWorkInfo?.checkIn }}</span>
+                  <span v-if="getBeforeWorkInfo?.isNightShift" class="alert-shift">夜勤</span>
+                  <span class="alert-days-ago">{{ getBeforeWorkInfo?.daysAgo }}日前</span>
                 </div>
               </div>
             </div>
@@ -1601,7 +1629,7 @@ const closeEmployeeModal = () => {
     align-items: stretch;
   }
 
-  .yesterday-work-alert {
+  .before-work-alert {
     flex-direction: column;
     text-align: center;
     gap: 1rem;
@@ -1919,6 +1947,7 @@ const closeEmployeeModal = () => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 3rem;
 }
 
 .employee-basic-info {
@@ -1944,7 +1973,7 @@ const closeEmployeeModal = () => {
 }
 
 /* 전날 미퇴근 알림 스타일 */
-.yesterday-work-alert {
+.before-work-alert {
   background: #fff3cd;
   border: 2px solid #ffc107;
   border-radius: 12px;
@@ -1955,7 +1984,6 @@ const closeEmployeeModal = () => {
   align-items: center;
   gap: 1.5rem;
   min-height: 60px;
-  max-width: 400px;
 }
 
 .alert-icon {
@@ -1993,6 +2021,16 @@ const closeEmployeeModal = () => {
 
 .alert-shift {
   background: #856404;
+  color: white;
+  padding: 0.3rem 0.8rem;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  display: inline-block;
+}
+
+.alert-days-ago {
+  background: #e74c3c;
   color: white;
   padding: 0.3rem 0.8rem;
   border-radius: 6px;
