@@ -1862,8 +1862,8 @@ const deleteChangeRequest = async (requestId: string) => {
     await loadChangeRequests()
     alert('要請を取り消しました。')
   } catch (error) {
-    console.error('要請削除 중 오류 발생:', error)
-    alert('要請の削除に失敗しました。')
+    console.error('リクエスト削除 중 오류 발생:', error)
+    alert('リクエストの削除に失敗しました。')
   }
 }
 
@@ -2421,6 +2421,7 @@ const isVacationSubmitDisabled = computed(() => {
                   @click="deleteChangeRequest(request.id)"
                   class="delete-request-btn"
                   title="リクエストを削除"
+                  :disabled="request.status !== 'pending'"
                 >
                   取り消し
                 </button>
@@ -4544,6 +4545,11 @@ const isVacationSubmitDisabled = computed(() => {
   background: #c0392b;
   transform: translateY(-1px);
   box-shadow: 0 4px 15px rgba(231, 76, 60, 0.3);
+}
+
+.delete-request-btn:disabled {
+  background: #bdc3c7;
+  cursor: not-allowed;
 }
 
 /* 0.5일 오전/오후 선택 스타일 */
