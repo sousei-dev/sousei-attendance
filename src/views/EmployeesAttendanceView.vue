@@ -1852,6 +1852,21 @@ const deleteVacation = async (vacationId: string) => {
   }
 }
 
+// リクエスト削除
+const deleteChangeRequest = async (requestId: string) => {
+  if (!confirm('リクエストを取り消しますか？')) return
+  
+  try {
+    const { supabase } = await import('../lib/supabase')
+    await supabase.from('attendance_change_requests').delete().eq('id', requestId)
+    await loadChangeRequests()
+    alert('要請を取り消しました。')
+  } catch (error) {
+    console.error('要請削除 중 오류 발생:', error)
+    alert('要請の削除に失敗しました。')
+  }
+}
+
 // 휴가 카테고리 텍스트
 const getVacationCategoryText = (category: string) => {
   switch (category) {
@@ -2167,7 +2182,7 @@ const isVacationSubmitDisabled = computed(() => {
           </div>
         </div>
         <div class="stat-card">
-          <div class="stat-icon">🎉</div>
+          <div class="stat-icon">🗒️</div>
           <div class="stat-content">
             <div class="stat-number">{{ workStats.specialLeaveDays }}日</div>
             <div class="stat-label">特別休暇</div>
@@ -2374,6 +2389,7 @@ const isVacationSubmitDisabled = computed(() => {
               <th>理由</th>
               <th>状態</th>
               <th>送信日時</th>
+              <th>操作</th>
             </tr>
           </thead>
           <tbody>
@@ -2400,6 +2416,15 @@ const isVacationSubmitDisabled = computed(() => {
                 </span>
               </td>
               <td>{{ formatDateTime(request.created_at) }}</td>
+              <td>
+                <button 
+                  @click="deleteChangeRequest(request.id)"
+                  class="delete-request-btn"
+                  title="リクエストを削除"
+                >
+                  取り消し
+                </button>
+              </td>
             </tr>
           </tbody>
         </table>
@@ -2880,7 +2905,7 @@ const isVacationSubmitDisabled = computed(() => {
                     :disabled="!isMorningAvailable"
                     class="radio-input"
                   >
-                  <span class="radio-label" :class="{ 'disabled': !isMorningAvailable }">午前 (09:00~12:00)</span>
+                  <span class="radio-label" :class="{ 'disabled': !isMorningAvailable }">午前</span>
                   <span v-if="!isMorningAvailable" class="disabled-badge">選択不可</span>
                 </label>
                 <label class="radio-option" :class="{ 'disabled': !isAfternoonAvailable }">
@@ -2892,7 +2917,7 @@ const isVacationSubmitDisabled = computed(() => {
                     :disabled="!isAfternoonAvailable"
                     class="radio-input"
                   >
-                  <span class="radio-label" :class="{ 'disabled': !isAfternoonAvailable }">午後 (13:00~18:00)</span>
+                  <span class="radio-label" :class="{ 'disabled': !isAfternoonAvailable }">午後</span>
                   <span v-if="!isAfternoonAvailable" class="disabled-badge">選択不可</span>
                 </label>
               </div>
@@ -4495,6 +4520,27 @@ const isVacationSubmitDisabled = computed(() => {
 }
 
 .delete-vacation-btn:hover {
+  background: #c0392b;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 15px rgba(231, 76, 60, 0.3);
+}
+
+/* リクエスト削除 버튼 스타일 */
+.delete-request-btn {
+  background: #e74c3c;
+  color: white;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.delete-request-btn:hover {
   background: #c0392b;
   transform: translateY(-1px);
   box-shadow: 0 4px 15px rgba(231, 76, 60, 0.3);
