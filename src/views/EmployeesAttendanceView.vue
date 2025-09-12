@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { useSupabaseAttendanceStore } from '../stores/supabaseAttendance'
 import { useAuthStore } from '../stores/auth'
-import { ref, computed, onMounted, watch, nextTick } from 'vue'
-import type { AttendanceRecord } from '../lib/supabase'
+import { ref, computed, onMounted, watch } from 'vue'
+import type { AttendanceRecord, Employee } from '../lib/supabase'
 import { useRoute } from 'vue-router'
 
 const store = useSupabaseAttendanceStore()
@@ -12,6 +12,10 @@ const route = useRoute()
 // 선택된 직원
 const selectedEmployeeId = ref('')
 const selectedCompanyId = ref('')
+
+// 로컬 직원 목록 (EmployeesAttendanceView에서만 사용)
+const localEmployees = ref<Employee[]>([])
+const localAttendanceRecords = ref<AttendanceRecord[]>([])
 
 // 날짜 선택
 const getDefaultStartDate = (employee?: { pay_period_end_type?: string | number }) => {
@@ -61,6 +65,84 @@ const endDate = ref('')
 
 // 로딩 상태
 const loading = ref(false)
+
+// 로컬 데이터 로드 함수 (직원 목록만 로드)
+const loadLocalData = async () => {
+  try {
+    // store에서 직원 데이터만 가져와서 로컬 변수에 저장
+    await store.initialize()
+    localEmployees.value = [...store.employees]
+    // attendanceRecords는 서버에서 직접 로드하므로 여기서는 초기화하지 않음
+    localAttendanceRecords.value = []
+  } catch (error) {
+    console.error('로컬 데이터 로드 중 오류 발생:', error)
+  }
+}
+
+// 서버에서 출근 기록을 직접 로드하는 함수
+const loadAttendanceRecordsFromServer = async () => {
+  if (!selectedEmployee.value || !startDate.value || !endDate.value) {
+    localAttendanceRecords.value = []
+    return
+  }
+  
+  try {
+    loading.value = true
+    const { supabase } = await import('../lib/supabase')
+    
+    const { data, error } = await supabase
+      .from('attendance_records')
+      .select('*')
+      .eq('employee_id', selectedEmployee.value.id)
+      .gte('date', startDate.value)
+      .lte('date', endDate.value)
+      .eq('is_deleted', false)
+      .order('date', { ascending: true })
+    
+    if (error) {
+      throw error
+    }
+    
+    localAttendanceRecords.value = data || []
+  } catch (error) {
+    console.error('출근 기록 로드 중 오류 발생:', error)
+    localAttendanceRecords.value = []
+  } finally {
+    loading.value = false
+  }
+}
+
+// 로컬 직원 목록을 회사별로 필터링하는 함수
+const getLocalEmployeesByCompany = (companyId: string) => {
+  if (!companyId) return []
+  return localEmployees.value.filter(employee => employee.company_id === companyId)
+}
+
+// 로컬 활성 직원 목록 (staff 계정의 경우 facility_id로 필터링)
+const localActiveEmployees = computed(() => {
+  if (authStore.isStaff && authStore.user?.facility_id) {
+    return localEmployees.value.filter(employee => 
+      employee.facility_id === authStore.user?.facility_id && 
+      employee.is_active
+    )
+  }
+  return localEmployees.value.filter(employee => employee.is_active)
+})
+
+// 선택된 회사의 직원 목록
+const selectedCompanyEmployees = computed(() => {
+  if (!selectedCompanyId.value) return []
+  return getLocalEmployeesByCompany(selectedCompanyId.value)
+})
+
+// 직원 선택 드롭다운에서 사용할 직원 목록
+const availableEmployees = computed(() => {
+  if (authStore.isAdmin) {
+    return selectedCompanyEmployees.value
+  } else {
+    return localActiveEmployees.value
+  }
+})
 
 // 수정요청 관련 상태
 const showChangeRequestModal = ref(false)
@@ -240,7 +322,9 @@ onMounted(async () => {
       await authStore.checkSession()
     }
     
-    await store.initialize()
+    // 로컬 데이터 로드 (직원 목록만)
+    await loadLocalData()
+    
     // 현재 연도의 공휴일 가져오기
     const currentYear = new Date().getFullYear()
     await fetchHolidays(currentYear)
@@ -262,15 +346,15 @@ onMounted(async () => {
 })
 
 // store가 초기화된 후 staff 계정의 company_id 설정
-watch(() => store.companies, (companies) => {
-  if (companies.length > 0 && authStore.isStaff && authStore.user?.company_id && !selectedCompanyId.value) {
+watch(() => localEmployees.value, (employees) => {
+  if (employees.length > 0 && authStore.isStaff && authStore.user?.company_id && !selectedCompanyId.value) {
     selectedCompanyId.value = authStore.user.company_id
   }
 }, { immediate: true })
 
 // auth store의 사용자 정보가 변경될 때도 company_id 설정
 watch(() => authStore.user, () => {
-  if (store.companies.length > 0 && authStore.isStaff && authStore.user?.company_id && !selectedCompanyId.value) {
+  if (localEmployees.value.length > 0 && authStore.isStaff && authStore.user?.company_id && !selectedCompanyId.value) {
     selectedCompanyId.value = authStore.user.company_id
   }
 }, { immediate: true })
@@ -426,15 +510,9 @@ const submitRegistrationRequest = async () => {
   }
 }
 
-// 출근 기록 로드 함수
+// 출근 기록 로드 함수 (서버에서 직접 로드)
 const loadAttendanceRecords = async () => {
-  if (!selectedEmployee.value || !startDate.value || !endDate.value) return
-  
-  try {
-    await store.loadAttendanceRecords(startDate.value, endDate.value)
-  } catch (error) {
-    console.error('출근 기록 로드 중 오류 발생:', error)
-  }
+  await loadAttendanceRecordsFromServer()
 }
 
 // 요청 상태 관련 함수들
@@ -554,11 +632,11 @@ const getRequestTypeColor = (requestType: string) => {
   }
 }
 
-// 특정 날짜에 이미 기록이 있는지 확인
+// 특정 날짜에 이미 기록이 있는지 확인 (로컬 데이터 사용)
 const hasExistingRecord = (date: string) => {
   if (!selectedEmployee.value) return false
   
-  return store.attendanceRecords.some(record => 
+  return localAttendanceRecords.value.some(record => 
     record.employee_id === selectedEmployee.value?.id && 
     record.date === date
   )
@@ -607,11 +685,11 @@ const hasExistingRequest = (date: string) => {
   )
 }
 
-// 선택된 기간의 기록 조회
+// 선택된 기간의 기록 조회 (로컬 데이터 사용)
 const selectedPeriodRecords = computed(() => {
   if (!selectedEmployeeId.value) return []
   
-  return store.attendanceRecords.filter(record => 
+  return localAttendanceRecords.value.filter(record => 
     record.employee_id === selectedEmployeeId.value &&
     record.date >= startDate.value &&
     record.date <= endDate.value
@@ -661,9 +739,9 @@ const selectedPeriodIntegratedRecords = computed(() => {
   return records.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
 })
 
-// 선택된 직원 정보
+// 선택된 직원 정보 (로컬 데이터에서 찾기)
 const selectedEmployee = computed(() => {
-  return store.getEmployeeById(selectedEmployeeId.value)
+  return localEmployees.value.find(employee => employee.id === selectedEmployeeId.value)
 })
 
 // 직원이 변경될 때 요청 목록 로드
@@ -671,11 +749,13 @@ watch(() => selectedEmployee.value, async (newEmployee) => {
   if (newEmployee) {
     await Promise.all([
       loadChangeRequests(),
-      loadVacationRecords()
+      loadVacationRecords(),
+      loadAttendanceRecordsFromServer() // 서버에서 출근 기록 로드
     ])
   } else {
     changeRequests.value = []
     vacationRecords.value = []
+    localAttendanceRecords.value = []
   }
 })
 
@@ -1274,6 +1354,7 @@ watch(selectedEmployeeId, () => {
 
 // startDate가 변경될 때 endDate 유효성 검사 및 자동 검색
 watch(startDate, (newStartDate) => {
+  console.log('startDate 변경:', newStartDate)
   if (newStartDate && endDate.value && newStartDate > endDate.value) {
     endDate.value = newStartDate
   }
@@ -1994,6 +2075,25 @@ const isVacationSubmitDisabled = computed(() => {
   return false
 })
 
+// 날짜 변경 감지 및 자동 검색
+watch([startDate, endDate], async () => {
+  if (selectedEmployee.value && startDate.value && endDate.value) {
+    await loadAttendanceRecordsFromServer()
+  }
+})
+
+// 직원 선택 변경 시 날짜 범위 업데이트 및 자동 검색
+watch(selectedEmployeeId, async () => {
+  if (selectedEmployee.value) {
+    // 선택된 직원의 급여 기간에 맞춰 날짜 범위 업데이트
+    startDate.value = getDefaultStartDate(selectedEmployee.value)
+    endDate.value = getDefaultEndDate(selectedEmployee.value)
+    
+    // 날짜가 설정되면 자동으로 검색 실행
+    await loadAttendanceRecordsFromServer()
+  }
+})
+
 </script>
 
 <template>
@@ -2082,7 +2182,7 @@ const isVacationSubmitDisabled = computed(() => {
         >
           <option value="">従業員を選択してください</option>
           <option 
-            v-for="employee in authStore.isAdmin ? store.getEmployeeByCompanyId(selectedCompanyId) : store.activeEmployees" 
+            v-for="employee in availableEmployees" 
             :key="employee.id" 
             :value="employee.id"
           >
