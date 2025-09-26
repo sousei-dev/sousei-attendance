@@ -1579,7 +1579,7 @@ const generateCSVData = (stats: Awaited<ReturnType<typeof store.getFacilityEmplo
         employee.facilityName,
         employee.isActive ? '在職' : '退職',
         employee.category,
-        employee.salaryType === 'monthly' ? '日給月給制(正社員)' : employee.salaryType === 'hourly' ? '時給制(パート)' : '-',
+        employee.salaryType === 'monthly' ? '日給月給制(正社員)' : employee.salaryType === 'hourly' ? '時給制(パート)' : employee.salaryType === 'salaried' ? '月給制' : '-',
         `${employee.payPeriodEndType}日`,
         employeeStartDate,
         employeeEndDate,
@@ -1599,7 +1599,7 @@ const generateCSVData = (stats: Awaited<ReturnType<typeof store.getFacilityEmplo
         employee.facilityName,
         employee.isActive ? '在職' : '退職',
         employee.category,
-        employee.salaryType === 'monthly' ? '日給月給制(正社員)' : employee.salaryType === 'hourly' ? '時給制(パート)' : '-',
+        employee.salaryType === 'monthly' ? '日給月給制(正社員)' : employee.salaryType === 'hourly' ? '時給制(パート)' : employee.salaryType === 'salaried' ? '月給制' : '-',
         `${employee.payPeriodEndType}日`,
         employeeStartDate,
         employeeEndDate,
@@ -2248,7 +2248,7 @@ watch(selectedEmployeeId, async () => {
         <div class="detail-item">
           <span class="label">給与形態:</span>
           <span class="value">
-            {{ selectedEmployee.salary_type === 'monthly' ? '日給月給制(正社員)' : selectedEmployee.salary_type === 'hourly' ? '時間給制(パート)' : '-' }}
+            {{ selectedEmployee.salary_type === 'monthly' ? '日給月給制(正社員)' : selectedEmployee.salary_type === 'hourly' ? '時間給制(パート)' : selectedEmployee.salary_type === 'salaried' ? '月給制' : '-' }}
           </span>
         </div>
         <div class="detail-item">
