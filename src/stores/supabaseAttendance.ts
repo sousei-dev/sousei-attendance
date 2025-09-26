@@ -685,12 +685,13 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
     )
   }
 
-  // 시설별 직원 목록 가져오기
+  // 시설별 직원 목록 가져오기 (is_active가 false인 직원도 포함)
   const getEmployeesByFacility = (facilityId: string) => {
     if (!facilityId) return []
     
     return employees.value.filter(emp => 
-      emp.facility_id === facilityId && emp.is_active
+      emp.facility_id === facilityId
+      // emp.is_active 조건 제거하여 모든 직원 포함
     )
   }
 
@@ -1257,6 +1258,7 @@ export const useSupabaseAttendanceStore = defineStore('supabaseAttendance', () =
         employeeCode: employee.employee_code,
         employeeName: `${employee.last_name}${employee.first_name}`,
         facilityName: employee.facility_id ? getFacilityName(employee.facility_id) : '-',
+        isActive: employee.is_active,
         category: employee.category_1,
         salaryType: employee.salary_type,
         payPeriodEndType: employee.pay_period_end_type,
